@@ -214,7 +214,7 @@ function App() {
             {activeTab === 'board' ? (
               <>
                 {/* Left Side: Kanban Board */}
-                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflowY: 'auto' }}>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
                   
                   {/* Active limits dashboard mini */}
                   <div style={{
@@ -252,7 +252,7 @@ function App() {
                 </div>
 
                 {/* Right Side: Sidebar Controls */}
-                <div style={{ width: '320px', height: '100%', display: 'flex', flexDirection: 'column' }}>
+                <div style={{ width: '340px', height: '100%', overflowY: 'auto', paddingRight: '5px' }}>
                   <Controls 
                     gameState={gameState}
                     onRollDice={rollDice}

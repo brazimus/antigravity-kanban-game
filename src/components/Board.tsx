@@ -25,11 +25,13 @@ export const Board: React.FC<BoardProps> = ({
   return (
     <div className="kanban-board-container" style={{
       display: 'grid',
-      gridTemplateColumns: `repeat(${columns.length}, minmax(180px, 1fr))`,
+      gridTemplateColumns: `repeat(${columns.length}, minmax(250px, 1fr))`,
       gap: '12px',
       overflowX: 'auto',
+      overflowY: 'hidden',
       padding: '5px 0',
-      minHeight: '480px'
+      height: '100%',
+      minHeight: 0
     }}>
       {columns.map(column => {
         const columnCards = cards.filter(c => c.columnId === column.id);
@@ -52,7 +54,8 @@ export const Board: React.FC<BoardProps> = ({
                 ? '1px solid rgba(244, 63, 94, 0.3)' 
                 : '1px solid var(--border-glass)',
               transition: 'all 0.3s ease',
-              minHeight: '450px'
+              height: '100%',
+              minHeight: 0
             }}
           >
             {/* Column Header */}

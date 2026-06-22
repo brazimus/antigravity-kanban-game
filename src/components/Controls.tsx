@@ -34,7 +34,7 @@ export const Controls: React.FC<ControlsProps> = ({
       display: 'flex',
       flexDirection: 'column',
       gap: '15px',
-      height: '100%',
+      minHeight: '100%',
     }}>
       
       {/* Simulation Status Card */}
