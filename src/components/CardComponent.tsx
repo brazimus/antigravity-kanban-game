@@ -308,7 +308,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                 className="btn btn-secondary"
                 style={{ flex: 1, padding: '2px 4px', fontSize: '0.65rem', borderRadius: '3px' }}
               >
-                &larr; Pull Back
+                ← Pull Back
               </button>
             )}
             
@@ -329,7 +329,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                   boxShadow: isEffortComplete ? '0 0 10px var(--accent-green-glow)' : 'none'
                 }}
               >
-                {isEffortComplete ? 'Ready to Pull &rarr;' : 'Progressing...'}
+                {isEffortComplete ? 'Ready to Pull →' : 'Progressing...'}
               </button>
             )}
           </div>

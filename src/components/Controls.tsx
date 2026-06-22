@@ -86,7 +86,7 @@ export const Controls: React.FC<ControlsProps> = ({
                   boxShadow: allAssigned ? 'var(--shadow-neon-success)' : 'var(--shadow-neon-primary)'
                 }}
               >
-                <CheckSquare size={16} /> Run Day {gameState.day} Work &rarr;
+                <CheckSquare size={16} /> Run Day {gameState.day} Work →
               </button>
             </div>
           )}
