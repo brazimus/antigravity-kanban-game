@@ -20,8 +20,6 @@ describe('useGameState Hook', () => {
       value: mockLocalStorage,
       writable: true
     });
-    // Also mock global localStorage
-    (global as any).localStorage = mockLocalStorage;
     localStorage.clear();
   });
 
