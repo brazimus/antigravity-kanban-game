@@ -8,6 +8,7 @@ interface ControlsProps {
   onEndDay: () => void;
   onStartNextDay: () => void;
   onRestartGame: () => void;
+  onResetDailyWork: () => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -16,6 +17,7 @@ export const Controls: React.FC<ControlsProps> = ({
   onEndDay,
   onStartNextDay,
   onRestartGame,
+  onResetDailyWork,
 }) => {
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -24,10 +26,8 @@ export const Controls: React.FC<ControlsProps> = ({
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [gameState.eventLogs]);
 
-  // Check how many devs are assigned
-  const assignedDevs = gameState.avatars.filter(a => a.assignedCardId !== null && a.currentRoll !== 0);
-  const totalActiveDevs = gameState.avatars.filter(a => a.currentRoll !== 0); // Not sick/inactive
-  const allAssigned = assignedDevs.length === totalActiveDevs.length;
+  // Calculate total remaining team capacity
+  const totalRemainingCapacity = gameState.avatars.reduce((sum, a) => sum + a.remainingCapacity, 0);
 
   return (
     <div className="controls-panel" style={{
@@ -70,24 +70,35 @@ export const Controls: React.FC<ControlsProps> = ({
 
           {gameState.gamePhase === 'dice_rolled' && (
             <div>
-              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>
-                {!allAssigned 
-                  ? `Assign developers on the board. (${assignedDevs.length}/${totalActiveDevs.length} assigned)` 
-                  : 'All developers assigned! Ready to run the day.'
+              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                <button 
+                  onClick={onResetDailyWork} 
+                  className="btn btn-secondary" 
+                  style={{ flex: 1, padding: '10px', fontSize: '0.8rem', gap: '4px' }}
+                >
+                  <RotateCcw size={12} /> Undo Today
+                </button>
+                <button 
+                  onClick={onEndDay} 
+                  className="btn btn-primary" 
+                  style={{ 
+                    flex: 2, 
+                    padding: '10px', 
+                    fontSize: '0.8rem',
+                    backgroundColor: totalRemainingCapacity === 0 ? 'var(--accent-green)' : 'var(--primary)',
+                    boxShadow: totalRemainingCapacity === 0 ? 'var(--shadow-neon-success)' : 'var(--shadow-neon-primary)',
+                    gap: '4px'
+                  }}
+                >
+                  <CheckSquare size={12} /> Run Day {gameState.day} →
+                </button>
+              </div>
+              <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                {totalRemainingCapacity > 0 
+                  ? `Remaining team capacity: ${totalRemainingCapacity} pt${totalRemainingCapacity !== 1 ? 's' : ''} left.` 
+                  : 'All capacity allocated! Click Run Day to progress.'
                 }
               </p>
-              <button 
-                onClick={onEndDay} 
-                className="btn btn-primary" 
-                style={{ 
-                  width: '100%', 
-                  padding: '12px',
-                  backgroundColor: allAssigned ? 'var(--accent-green)' : 'var(--primary)',
-                  boxShadow: allAssigned ? 'var(--shadow-neon-success)' : 'var(--shadow-neon-primary)'
-                }}
-              >
-                <CheckSquare size={16} /> Run Day {gameState.day} Work →
-              </button>
             </div>
           )}
 
@@ -126,8 +137,8 @@ export const Controls: React.FC<ControlsProps> = ({
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {gameState.avatars.map(avatar => {
-            const isAssigned = avatar.assignedCardId !== null;
-            const hasSwitchPenalty = avatar.previousCardId !== null && avatar.assignedCardId !== null && avatar.previousCardId !== avatar.assignedCardId;
+            const isWorkedToday = avatar.workedOnCardIdsToday.length > 0;
+            const hasSwitchPenalty = avatar.workedOnCardIdsToday.length > 0 && avatar.workedOnCardIdsToday.filter(id => id !== avatar.assignedCardId).length > 0;
             const isSick = avatar.currentRoll === 0;
 
             return (
@@ -140,7 +151,7 @@ export const Controls: React.FC<ControlsProps> = ({
                   padding: '8px',
                   borderRadius: 'var(--radius-sm)',
                   backgroundColor: 'rgba(255,255,255,0.02)',
-                  border: isAssigned ? `1px dashed ${avatar.color}` : '1px solid transparent'
+                  border: isWorkedToday ? `1px dashed ${avatar.color}` : '1px solid transparent'
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -163,9 +174,9 @@ export const Controls: React.FC<ControlsProps> = ({
                     <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
                       {isSick 
                         ? 'Absent today' 
-                        : isAssigned 
-                          ? 'Assigned to task' 
-                          : 'Idle (Unassigned)'
+                        : avatar.remainingCapacity > 0
+                          ? `${avatar.remainingCapacity} pt${avatar.remainingCapacity !== 1 ? 's' : ''} available` 
+                          : 'All capacity spent'
                       }
                     </p>
                   </div>
@@ -185,7 +196,7 @@ export const Controls: React.FC<ControlsProps> = ({
                       }}
                     >
                       Penalty
-                      <span className="tooltiptext">Context Switch Penalty: -1 capacity today</span>
+                      <span className="tooltiptext">Context Switch Penalty applied today (-1 capacity)</span>
                     </span>
                   )}
                   
@@ -194,7 +205,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     fontWeight: 700, 
                     color: isSick ? 'var(--accent-red)' : '#fff' 
                   }}>
-                    {avatar.currentRoll === null ? '?' : `${avatar.currentRoll} pts`}
+                    {avatar.currentRoll === null ? '?' : `${avatar.remainingCapacity} / ${avatar.currentRoll} pts`}
                   </span>
                 </div>
               </div>
@@ -249,7 +260,7 @@ export const Controls: React.FC<ControlsProps> = ({
             if (log.startsWith('---')) color = 'var(--primary)';
             else if (log.includes('[Blocker]') || log.includes('[QA Failure]')) color = 'var(--accent-red)';
             else if (log.includes('[Success]') || log.includes('[Pairing Save]')) color = 'var(--accent-green)';
-            else if (log.includes('switched to') || log.includes('Penalty')) color = 'var(--accent-amber)';
+            else if (log.includes('spent') || log.includes('applied') || log.includes('switching')) color = 'var(--accent-amber)';
 
             return (
               <div key={index} style={{ color, paddingBottom: '2px', borderBottom: '1px solid rgba(255,255,255,0.01)' }}>

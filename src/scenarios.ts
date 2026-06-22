@@ -119,7 +119,7 @@ export const defaultColumns = [
 ];
 
 export const defaultAvatars = [
-  { id: 'alice', name: 'Alice', color: '#ec4899', currentRoll: null, assignedCardId: null, previousCardId: null, spentCapacity: 0 },
-  { id: 'bob', name: 'Bob', color: '#3b82f6', currentRoll: null, assignedCardId: null, previousCardId: null, spentCapacity: 0 },
-  { id: 'charlie', name: 'Charlie', color: '#10b981', currentRoll: null, assignedCardId: null, previousCardId: null, spentCapacity: 0 }
+  { id: 'alice', name: 'Alice', color: '#ec4899', currentRoll: null, assignedCardId: null, previousCardId: null, spentCapacity: 0, remainingCapacity: 0, workedOnCardIdsToday: [] },
+  { id: 'bob', name: 'Bob', color: '#3b82f6', currentRoll: null, assignedCardId: null, previousCardId: null, spentCapacity: 0, remainingCapacity: 0, workedOnCardIdsToday: [] },
+  { id: 'charlie', name: 'Charlie', color: '#10b981', currentRoll: null, assignedCardId: null, previousCardId: null, spentCapacity: 0, remainingCapacity: 0, workedOnCardIdsToday: [] }
 ];

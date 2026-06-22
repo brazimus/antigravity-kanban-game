@@ -8,7 +8,7 @@ interface BoardProps {
   cards: CardType[];
   avatars: Avatar[];
   pairingAllowed: boolean;
-  onAssignAvatar: (avatarId: string, cardId: string | null) => void;
+  onAllocateCapacity: (avatarId: string, cardId: string) => void;
   onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string };
   gamePhase: string;
 }
@@ -18,7 +18,7 @@ export const Board: React.FC<BoardProps> = ({
   cards,
   avatars,
   pairingAllowed,
-  onAssignAvatar,
+  onAllocateCapacity,
   onMoveCard,
   gamePhase
 }) => {
@@ -135,7 +135,7 @@ export const Board: React.FC<BoardProps> = ({
                     avatars={avatars}
                     columns={columns}
                     pairingAllowed={pairingAllowed}
-                    onAssignAvatar={onAssignAvatar}
+                    onAllocateCapacity={onAllocateCapacity}
                     onMoveCard={onMoveCard}
                     gamePhase={gamePhase}
                   />

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { GameState, Card, DailyLog, ScenarioDayEvent } from './types';
+import type { GameState, Card, DailyLog, ScenarioDayEvent, CardStageEffort } from './types';
 import { easyModeScenario, defaultColumns, defaultAvatars } from './scenarios';
 
 const LOCAL_STORAGE_KEY = 'antigravity_kanban_game_state';
@@ -14,7 +14,6 @@ export const useGameState = () => {
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        // Basic validation to ensure it has day
         if (parsed && typeof parsed.day === 'number') {
           return parsed;
         }
@@ -45,7 +44,7 @@ export const useGameState = () => {
     localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(gameState));
   }, [gameState]);
 
-  // Restart/Initialize Game
+  // Start/Restart Game
   const startGame = useCallback(() => {
     const scenario = easyModeScenario;
     const initialEvent = scenario.events[1];
@@ -71,6 +70,8 @@ export const useGameState = () => {
       assignedCardId: null,
       previousCardId: null,
       spentCapacity: 0,
+      remainingCapacity: 0,
+      workedOnCardIdsToday: [],
     }));
 
     const welcomeLog = [
@@ -84,7 +85,6 @@ export const useGameState = () => {
       maxDays: scenario.totalDays,
       cards: initialCards,
       columns: defaultColumns.map(col => {
-        // Apply initial WIP limits from scenario if defined
         if (initialEvent.wipLimits && col.id in initialEvent.wipLimits) {
           return { ...col, wipLimit: initialEvent.wipLimits[col.id] };
         }
@@ -108,8 +108,7 @@ export const useGameState = () => {
     setGameState(prev => {
       const logs: string[] = [...prev.eventLogs, `--- Rolling capacity dice for Day ${prev.day} ---`];
       
-      const updatedAvatars = prev.avatars.map(avatar => {
-        // Roll standard d6
+      const rolledAvatars = prev.avatars.map(avatar => {
         const rawRoll = Math.floor(Math.random() * 6) + 1;
         let rollModifier = 0;
         let inactive = false;
@@ -118,12 +117,8 @@ export const useGameState = () => {
         if (prev.currentDayEvent?.capacityChange) {
           const capChange = prev.currentDayEvent.capacityChange.find(c => c.avatarId === avatar.id);
           if (capChange) {
-            if (capChange.inactive) {
-              inactive = true;
-            }
-            if (capChange.rollModifier) {
-              rollModifier = capChange.rollModifier;
-            }
+            if (capChange.inactive) inactive = true;
+            if (capChange.rollModifier) rollModifier = capChange.rollModifier;
             logs.push(`Event effect on ${avatar.name}: ${capChange.description}`);
           }
         }
@@ -134,7 +129,9 @@ export const useGameState = () => {
             ...avatar,
             currentRoll: 0,
             spentCapacity: 0,
+            remainingCapacity: 0,
             assignedCardId: null,
+            workedOnCardIdsToday: [],
           };
         }
 
@@ -145,97 +142,231 @@ export const useGameState = () => {
           ...avatar,
           currentRoll: finalRoll,
           spentCapacity: 0,
-          assignedCardId: null, // Reset daily assignment to force new decisions
+          remainingCapacity: finalRoll,
+          assignedCardId: null,
+          workedOnCardIdsToday: [],
         };
       });
 
-      // Clear card assignments
+      // Clear card assignments for the start of day
       const updatedCards = prev.cards.map(c => ({
         ...c,
         assignedAvatars: [],
       }));
 
+      // Take snapshot of day start so user can undo/reset work
+      const snapshotAtDayStart = {
+        cards: JSON.parse(JSON.stringify(updatedCards)),
+        avatars: JSON.parse(JSON.stringify(rolledAvatars)),
+      };
+
       return {
         ...prev,
-        avatars: updatedAvatars,
+        avatars: rolledAvatars,
         cards: updatedCards,
         rolledToday: true,
         gamePhase: 'dice_rolled',
         eventLogs: logs,
+        snapshotAtDayStart,
       };
     });
   }, [gameState.rolledToday, gameState.gamePhase]);
 
-  // Assign Avatar to Card
-  const assignAvatar = useCallback((avatarId: string, cardId: string | null) => {
+  // Reset Today's Allocations (Undo)
+  const resetDailyWork = useCallback(() => {
+    if (!gameState.snapshotAtDayStart || gameState.gamePhase !== 'dice_rolled') return;
+
+    setGameState(prev => {
+      if (!prev.snapshotAtDayStart) return prev;
+      
+      const logs = [...prev.eventLogs, `[Reset] Reset all capacity allocations for Day ${prev.day}.`];
+      
+      return {
+        ...prev,
+        cards: JSON.parse(JSON.stringify(prev.snapshotAtDayStart.cards)),
+        avatars: JSON.parse(JSON.stringify(prev.snapshotAtDayStart.avatars)),
+        eventLogs: logs,
+      };
+    });
+  }, [gameState.snapshotAtDayStart, gameState.gamePhase]);
+
+  // Allocate capacity to card (Real-Time Model 1)
+  const allocateCapacity = useCallback((avatarId: string, cardId: string) => {
     setGameState(prev => {
       const logs = [...prev.eventLogs];
       const avatar = prev.avatars.find(a => a.id === avatarId);
-      if (!avatar) return prev;
+      const card = prev.cards.find(c => c.id === cardId);
 
-      const previousAssignment = avatar.assignedCardId;
-      if (previousAssignment === cardId) return prev;
+      if (!avatar || !card) return prev;
+      if (avatar.remainingCapacity <= 0) {
+        logs.push(`[Warning] ${avatar.name} has no capacity remaining.`);
+        return prev;
+      }
 
-      // Handle unassignment
-      let updatedCards = prev.cards.map(card => {
-        // Remove from old card
-        if (previousAssignment && card.id === previousAssignment) {
-          return {
-            ...card,
-            assignedAvatars: card.assignedAvatars.filter(id => id !== avatarId),
-          };
-        }
-        return card;
-      });
+      // Check context switching penalty
+      // Penalty triggers if they worked on a DIFFERENT card today
+      const workedOnOthers = avatar.workedOnCardIdsToday.filter(id => id !== cardId);
+      const hasSwitchToday = workedOnOthers.length > 0;
+      // Also triggers if they switch from yesterday's last card
+      const hasSwitchFromYesterday = avatar.workedOnCardIdsToday.length === 0 && avatar.previousCardId !== null && avatar.previousCardId !== cardId;
+      const isSwitch = hasSwitchToday || hasSwitchFromYesterday;
+      const penalty = isSwitch ? 1 : 0;
 
-      // Handle new assignment
-      if (cardId) {
-        const targetCard = updatedCards.find(c => c.id === cardId);
-        if (!targetCard) return prev;
+      const availableCapacity = avatar.remainingCapacity - penalty;
+      if (availableCapacity <= 0) {
+        logs.push(`[Warning] ${avatar.name} has ${avatar.remainingCapacity} pt(s) left, but context-switching costs 1 pt. Cannot allocate.`);
+        return prev;
+      }
 
-        // Check if pairing is allowed
-        if (!prev.pairingAllowed && targetCard.assignedAvatars.length >= 1) {
-          logs.push(`[Warning] Pairing is disabled in this stage. Cannot assign ${avatar.name} to "${targetCard.title}".`);
+      // Handle Blocker check
+      if (card.isBlocked) {
+        // Unblocking takes 2 capacity points
+        if (availableCapacity < 2) {
+          logs.push(`[Warning] Unblocking "${card.title}" requires 2 capacity points. ${avatar.name} has only ${availableCapacity} available.`);
           return prev;
         }
 
-        // Limit to max 2 avatars per card
-        if (targetCard.assignedAvatars.length >= 2) {
-          logs.push(`[Warning] Maximum 2 developers can work on "${targetCard.title}" simultaneously.`);
-          return prev;
+        const capacityToSpend = 2;
+        const totalCost = capacityToSpend + penalty;
+
+        // Perform unblock roll (4+ on d6). If paired, roll with advantage.
+        // Check if another dev is already assigned to this blocked card
+        const isPairedUnblock = card.assignedAvatars.length > 0;
+        const roll1 = Math.floor(Math.random() * 6) + 1;
+        const roll2 = isPairedUnblock ? Math.floor(Math.random() * 6) + 1 : 0;
+        const maxRoll = Math.max(roll1, roll2);
+
+        logs.push(`${avatar.name} spent 2 capacity trying to unblock "${card.title}"${isSwitch ? ' (including -1 task switch penalty)' : ''}.`);
+        logs.push(`Unblock roll: ${roll1}${isPairedUnblock ? ` (with helper roll: ${roll2})` : ''} -> Result: ${maxRoll}`);
+
+        let isBlocked: boolean = card.isBlocked;
+        let blockerReason = card.blockerReason;
+
+        if (maxRoll >= 4) {
+          logs.push(`[Success] "${card.title}" is now UNBLOCKED!`);
+          isBlocked = false;
+          blockerReason = undefined;
+        } else {
+          logs.push(`[Failed] Blocker on "${card.title}" persists.`);
         }
 
-        updatedCards = updatedCards.map(card => {
-          if (card.id === cardId) {
+        const updatedCards = prev.cards.map(c => {
+          if (c.id === cardId) {
             return {
-              ...card,
-              assignedAvatars: [...card.assignedAvatars, avatarId],
+              ...c,
+              isBlocked,
+              blockerReason,
+              assignedAvatars: c.assignedAvatars.includes(avatarId) ? c.assignedAvatars : [...c.assignedAvatars, avatarId],
             };
           }
-          return card;
+          return c;
         });
 
-        // Context switching penalty log check
-        if (avatar.previousCardId && avatar.previousCardId !== cardId) {
-          logs.push(`${avatar.name} switched to "${targetCard.title}" (Context Switching Penalty: -1 capacity).`);
-        } else {
-          logs.push(`${avatar.name} assigned to "${targetCard.title}".`);
+        const updatedAvatars = prev.avatars.map(a => {
+          if (a.id === avatarId) {
+            return {
+              ...a,
+              remainingCapacity: a.remainingCapacity - totalCost,
+              spentCapacity: a.spentCapacity + totalCost,
+              workedOnCardIdsToday: a.workedOnCardIdsToday.includes(cardId) ? a.workedOnCardIdsToday : [...a.workedOnCardIdsToday, cardId],
+              assignedCardId: cardId,
+            };
+          }
+          return a;
+        });
+
+        return {
+          ...prev,
+          cards: updatedCards,
+          avatars: updatedAvatars,
+          eventLogs: logs,
+        };
+      }
+
+      // Normal Effort progress
+      const currentColumn = prev.columns.find(col => col.id === card.columnId);
+      const allowedEfforts = currentColumn ? currentColumn.allowedEffortTypes : [];
+      
+      // Find what effort type and points are needed
+      let activeEffortType: keyof CardStageEffort | null = null;
+      let neededProgress = 0;
+
+      for (const type of allowedEfforts) {
+        if (card.remainingEffort[type] > 0) {
+          activeEffortType = type;
+          neededProgress = card.remainingEffort[type];
+          break;
+        }
+      }
+
+      if (!activeEffortType || neededProgress === 0) {
+        logs.push(`[Warning] No active effort required for "${card.title}" in this stage.`);
+        return prev;
+      }
+
+      // Check if paired (is helper)
+      // If someone else already assigned, this developer is the helper
+      const isHelper = card.assignedAvatars.length > 0 && !card.assignedAvatars.includes(avatarId);
+      if (isHelper && !prev.pairingAllowed) {
+        logs.push(`[Warning] Pairing is disabled. Cannot assign ${avatar.name} as a helper.`);
+        return prev;
+      }
+
+      let capacityToSpend = 0;
+      let progressToApply = 0;
+
+      if (isHelper) {
+        // Helper gets 50% progress.
+        // To get P progress points, they must spend P * 2 capacity.
+        const maxProgressPossible = Math.floor(availableCapacity / 2);
+        progressToApply = Math.min(neededProgress, maxProgressPossible);
+        capacityToSpend = progressToApply * 2;
+
+        if (capacityToSpend === 0 && availableCapacity > 0) {
+          logs.push(`[Warning] Helper requires at least 2 capacity points to make 1 progress point. ${avatar.name} has only ${availableCapacity} available.`);
+          return prev;
         }
       } else {
-        logs.push(`${avatar.name} unassigned.`);
+        // Lead dev gets 100% progress
+        progressToApply = Math.min(neededProgress, availableCapacity);
+        capacityToSpend = progressToApply;
       }
+
+      const totalCost = capacityToSpend + penalty;
+      logs.push(`${avatar.name} applied ${capacityToSpend} capacity points -> generated ${progressToApply} progress on "${card.title}"${isSwitch ? ' (including -1 task switch penalty)' : ''}${isHelper ? ' [Pair Helper 50% rate]' : ' [Lead Dev]'}.`);
+
+      const updatedCards = prev.cards.map(c => {
+        if (c.id === cardId) {
+          const newRemaining = { ...c.remainingEffort };
+          if (activeEffortType) {
+            newRemaining[activeEffortType] = Math.max(0, newRemaining[activeEffortType] - progressToApply);
+          }
+          return {
+            ...c,
+            remainingEffort: newRemaining,
+            assignedAvatars: c.assignedAvatars.includes(avatarId) ? c.assignedAvatars : [...c.assignedAvatars, avatarId],
+          };
+        }
+        return c;
+      });
 
       const updatedAvatars = prev.avatars.map(a => {
         if (a.id === avatarId) {
-          return { ...a, assignedCardId: cardId };
+          return {
+            ...a,
+            remainingCapacity: a.remainingCapacity - totalCost,
+            spentCapacity: a.spentCapacity + totalCost,
+            workedOnCardIdsToday: a.workedOnCardIdsToday.includes(cardId) ? a.workedOnCardIdsToday : [...a.workedOnCardIdsToday, cardId],
+            assignedCardId: cardId, // set active card
+          };
         }
         return a;
       });
 
       return {
         ...prev,
-        avatars: updatedAvatars,
         cards: updatedCards,
+        avatars: updatedAvatars,
         eventLogs: logs,
       };
     });
@@ -254,11 +385,10 @@ export const useGameState = () => {
       const sourceColumn = card.columnId;
       if (sourceColumn === targetColumnId) return prev;
 
-      // WIP Limit Enforcement (Week 2 onwards / Active limits)
+      // WIP Limit Enforcement
       const targetColumn = prev.columns.find(col => col.id === targetColumnId);
       if (targetColumn && targetColumn.wipLimit !== null) {
         const currentWIP = prev.cards.filter(c => c.columnId === targetColumnId).length;
-        // Expedited cards can bypass WIP limits
         if (currentWIP >= targetColumn.wipLimit && card.type !== 'expedite') {
           success = false;
           errorMessage = `WIP limit reached! Column "${targetColumn.name}" has a limit of ${targetColumn.wipLimit}.`;
@@ -266,31 +396,29 @@ export const useGameState = () => {
         }
       }
 
-      // Blocked card check (Cannot drag blocked cards forward)
+      // Blocked card check
       const columnOrder = prev.columns.map(c => c.id);
       const sourceIndex = columnOrder.indexOf(sourceColumn);
       const targetIndex = columnOrder.indexOf(targetColumnId);
       
       if (card.isBlocked && targetIndex > sourceIndex) {
         success = false;
-        errorMessage = `Cannot move "${card.title}" forward while it is blocked. You must resolve the blocker first.`;
+        errorMessage = `Cannot move "${card.title}" forward while it is blocked.`;
         return prev;
       }
 
-      // Effort requirement check
-      // Player cannot move card forward if effort remains in the source column's required stage
+      // Effort check
       const sourceColObj = prev.columns.find(col => col.id === sourceColumn);
       if (sourceColObj && targetIndex > sourceIndex) {
         const requiredEfforts = sourceColObj.allowedEffortTypes;
         const unfinishedEffort = requiredEfforts.some(effortType => card.remainingEffort[effortType] > 0);
         if (unfinishedEffort) {
           success = false;
-          errorMessage = `Cannot move "${card.title}" forward. Effort is still required in the "${sourceColObj.name}" column.`;
+          errorMessage = `Cannot move "${card.title}" forward. Effort is still required in "${sourceColObj.name}".`;
           return prev;
         }
       }
 
-      // Move is valid
       logs.push(`Moved "${card.title}" from ${sourceColumn.toUpperCase()} to ${targetColumnId.toUpperCase()}.`);
 
       const updatedCards = prev.cards.map(c => {
@@ -306,26 +434,15 @@ export const useGameState = () => {
             columnId: targetColumnId,
             startedAt,
             completedAt,
-            // Clear assignments when moved
-            assignedAvatars: [],
             history: [...c.history, { day: prev.day, columnId: targetColumnId }],
           };
         }
         return c;
       });
 
-      // Clear avatar assignments to this card
-      const updatedAvatars = prev.avatars.map(a => {
-        if (a.assignedCardId === cardId) {
-          return { ...a, assignedCardId: null };
-        }
-        return a;
-      });
-
       return {
         ...prev,
         cards: updatedCards,
-        avatars: updatedAvatars,
         eventLogs: logs,
       };
     });
@@ -333,137 +450,64 @@ export const useGameState = () => {
     return { success, errorMessage };
   }, []);
 
-  // End Day & Process Work
+  // End Day & Finalize Metrics (Blockers & QA check)
   const endDay = useCallback(() => {
     setGameState(prev => {
       const logs = [...prev.eventLogs, `--- End of Day ${prev.day} processing ---`];
       
-      // 1. Process effort allocation
       let updatedCards = [...prev.cards];
-      const updatedAvatars = prev.avatars.map(avatar => {
-        const assignedCardId = avatar.assignedCardId;
-        if (!assignedCardId) return avatar;
 
-        const cardIndex = updatedCards.findIndex(c => c.id === assignedCardId);
-        if (cardIndex === -1) return avatar;
-
-        const card = updatedCards[cardIndex];
-        const rawRoll = avatar.currentRoll || 0;
-        
-        // Calculate penalty for context switching
-        const hasSwitched = avatar.previousCardId !== null && avatar.previousCardId !== assignedCardId;
-        const penalty = hasSwitched ? 1 : 0;
-        const capacity = Math.max(1, rawRoll - penalty);
-
-        // Figure out if avatar is primary or helper (pairing)
-        const avatarAssignedOrder = card.assignedAvatars.indexOf(avatar.id);
-        const isHelper = avatarAssignedOrder > 0; // index 0 is Lead, 1 is Helper
-
-        const capacitySpent = isHelper ? Math.max(1, Math.floor(capacity / 2)) : capacity;
-        
-        // Apply progress
-        if (card.isBlocked) {
-          logs.push(`${avatar.name} dedicated capacity to unblocking "${card.title}".`);
-        } else {
-          // Normal progress
-          const currentColumn = prev.columns.find(col => col.id === card.columnId);
-          const allowedEfforts = currentColumn ? currentColumn.allowedEffortTypes : [];
-          
-          let pointsToApply = capacitySpent;
-          const newRemainingEffort = { ...card.remainingEffort };
-
-          for (const effortType of allowedEfforts) {
-            const remaining = newRemainingEffort[effortType];
-            if (remaining > 0) {
-              const applied = Math.min(pointsToApply, remaining);
-              newRemainingEffort[effortType] = remaining - applied;
-              pointsToApply -= applied;
-              logs.push(`${avatar.name} applied ${applied} points of ${effortType} effort to "${card.title}" (Remaining: ${newRemainingEffort[effortType]}).`);
-              if (pointsToApply <= 0) break;
-            }
-          }
-
-          updatedCards[cardIndex] = {
-            ...card,
-            remainingEffort: newRemainingEffort,
-          };
-        }
-
-        return {
-          ...avatar,
-          spentCapacity: capacitySpent,
-          previousCardId: assignedCardId, // Set for tomorrow's context check
-        };
-      });
-
-      // 2. Roll blocker resolution / Blocker checks at Card level
+      // 1. Blocker checks for active cards that had work applied today
       updatedCards = updatedCards.map(card => {
-        if (card.assignedAvatars.length === 0) return card;
+        const workedOnToday = card.assignedAvatars.length > 0;
+        const isWorking = card.columnId !== 'backlog' && card.columnId !== 'ready' && card.columnId !== 'done';
+        
+        if (workedOnToday && isWorking && !card.isBlocked) {
+          const isPaired = card.assignedAvatars.length > 1;
+          const roll1 = Math.random();
+          const roll2 = isPaired ? Math.random() : 1; // 1 means safe
+          
+          const blockerThreshold = 0.15;
+          const blocked1 = roll1 < blockerThreshold;
+          const blocked2 = roll2 < blockerThreshold;
 
-        const isPaired = card.assignedAvatars.length > 1;
-
-        if (card.isBlocked) {
-          // Roll for unblocking: 4+ on d6. If paired, roll with advantage (two dice, take highest)
-          const roll1 = Math.floor(Math.random() * 6) + 1;
-          const roll2 = isPaired ? Math.floor(Math.random() * 6) + 1 : 0;
-          const maxRoll = Math.max(roll1, roll2);
-
-          logs.push(`Unblocking roll for "${card.title}": ${roll1}${isPaired ? ` and helper rolled ${roll2}` : ''} (Highest: ${maxRoll})`);
-
-          if (maxRoll >= 4) {
-            logs.push(`[Success] "${card.title}" is now UNBLOCKED!`);
+          if (blocked1 && blocked2) {
+            logs.push(`[Blocker] Oh no! "${card.title}" got blocked by a quality bug.`);
             return {
               ...card,
-              isBlocked: false,
-              blockerReason: undefined,
+              isBlocked: true,
+              blockerReason: 'Quality defect: Code refactor required.',
             };
-          } else {
-            logs.push(`[Failed] Blocker on "${card.title}" persists (rolled under 4).`);
-            return card;
-          }
-        } else {
-          // Blocker check on work applied
-          const isWorking = card.columnId !== 'backlog' && card.columnId !== 'ready' && card.columnId !== 'done';
-          if (isWorking) {
-            const roll1 = Math.random();
-            const roll2 = isPaired ? Math.random() : 1;
-            
-            const blockerThreshold = 0.15;
-            const blocked1 = roll1 < blockerThreshold;
-            const blocked2 = roll2 < blockerThreshold;
-
-            if (blocked1 && blocked2) {
-              logs.push(`[Blocker] Oh no! "${card.title}" got blocked! Reason: Quality defect found.`);
-              return {
-                ...card,
-                isBlocked: true,
-                blockerReason: 'Quality defect: Code refactor required.',
-              };
-            } else if (blocked1 && isPaired) {
-              logs.push(`[Pairing Save] A potential blocker was avoided on "${card.title}" due to paired tasking quality checks!`);
-            }
+          } else if (blocked1 && isPaired) {
+            logs.push(`[Pairing Save] A blocker check on "${card.title}" failed, but was avoided due to paired quality validation!`);
           }
         }
         return card;
       });
 
-      // 3. Check for QA Rework logic
+      // 2. QA Rework checks for Testing cards that finished testing today
       updatedCards = updatedCards.map(card => {
-        if (card.columnId === 'testing' && card.remainingEffort.testing === 0 && card.assignedAvatars.length > 0 && !card.isBlocked) {
+        // Rework triggers if the testing effort is complete, it had work applied today, and isn't blocked
+        const workedOnToday = card.assignedAvatars.length > 0;
+        const isTestingDone = card.columnId === 'testing' && card.remainingEffort.testing === 0;
+
+        if (isTestingDone && workedOnToday && !card.isBlocked) {
           const isPaired = card.assignedAvatars.length > 1;
           const qaFailChance = isPaired ? 0.02 : 0.20;
           
           if (Math.random() < qaFailChance) {
-            logs.push(`[QA Failure] "${card.title}" failed QA checks. Rework needed! Sent back to Development.`);
+            logs.push(`[QA Failure] "${card.title}" failed QA validation. Sent back to Development for rework.`);
             return {
               ...card,
               columnId: 'development',
               remainingEffort: {
                 ...card.remainingEffort,
-                development: 2,
-                testing: 1,
+                development: 2, // rework effort
+                testing: 1,     // retest effort
               },
               failedQACount: card.failedQACount + 1,
+              // Reset assignments so they don't carry over
+              assignedAvatars: [],
               history: [...card.history, { day: prev.day, columnId: 'development' }],
             };
           }
@@ -471,7 +515,21 @@ export const useGameState = () => {
         return card;
       });
 
-      // 4. Log Daily Metrics for CFD & run charts
+      // 3. Clear avatar daily assignments for next day, set previousCardId
+      const updatedAvatars = prev.avatars.map(avatar => {
+        // If they worked on multiple cards, set the last one as previousCardId
+        const lastCardWorked = avatar.workedOnCardIdsToday.slice(-1)[0] || avatar.previousCardId;
+        return {
+          ...avatar,
+          previousCardId: lastCardWorked,
+          assignedCardId: null,
+          spentCapacity: 0,
+          remainingCapacity: 0,
+          workedOnCardIdsToday: [],
+        };
+      });
+
+      // 4. Log Daily Metrics for CFD & reports
       const nextDay = prev.day + 1;
       const completedCardsToday = updatedCards.filter(c => c.columnId === 'done' && c.completedAt === prev.day);
       const completedCount = completedCardsToday.length;
@@ -541,7 +599,6 @@ export const useGameState = () => {
       
       const logs = [...prev.eventLogs, `--- Start Day ${nextDay} ---`];
 
-      // Apply day event if present
       let updatedCards = [...prev.cards];
       let updatedColumns = [...prev.columns];
       let pairingAllowed = prev.pairingAllowed;
@@ -610,8 +667,16 @@ export const useGameState = () => {
           currentRoll: null,
           assignedCardId: null,
           spentCapacity: 0,
+          remainingCapacity: 0,
+          workedOnCardIdsToday: [],
         };
       });
+
+      // Clear card assignments (so we start fresh today)
+      updatedCards = updatedCards.map(c => ({
+        ...c,
+        assignedAvatars: [],
+      }));
 
       return {
         ...prev,
@@ -665,7 +730,8 @@ export const useGameState = () => {
     gameState,
     startGame,
     rollDice,
-    assignAvatar,
+    allocateCapacity,
+    resetDailyWork,
     moveCard,
     endDay,
     startNextDay,

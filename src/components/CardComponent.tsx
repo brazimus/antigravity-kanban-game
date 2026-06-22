@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import type { Card as CardType, Avatar, Column } from '../types';
-import { AlertOctagon, UserPlus } from 'lucide-react';
+import { AlertOctagon, UserPlus, ShieldAlert } from 'lucide-react';
 
 interface CardComponentProps {
   card: CardType;
   avatars: Avatar[];
   columns: Column[];
   pairingAllowed: boolean;
-  onAssignAvatar: (avatarId: string, cardId: string | null) => void;
+  onAllocateCapacity: (avatarId: string, cardId: string) => void;
   onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string };
   gamePhase: string;
 }
@@ -17,7 +17,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   avatars,
   columns,
   pairingAllowed,
-  onAssignAvatar,
+  onAllocateCapacity,
   onMoveCard,
   gamePhase
 }) => {
@@ -25,9 +25,31 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   const currentColumn = columns.find(col => col.id === card.columnId);
   const activeEffortTypes = currentColumn?.allowedEffortTypes || [];
 
-  // Find which avatars are assigned to this card
+  // Find which avatars are assigned to this card today
   const assignedAvatars = avatars.filter(a => card.assignedAvatars.includes(a.id));
-  const unassignedAvatars = avatars.filter(a => !card.assignedAvatars.includes(a.id) && a.currentRoll !== 0);
+  
+  // Find devs who still have capacity to work
+  const availableDevs = avatars.filter(a => {
+    // Check if they have capacity remaining today
+    if (a.remainingCapacity <= 0) return false;
+
+    // Check context switch cost
+    const workedOnOthers = a.workedOnCardIdsToday.filter(id => id !== card.id);
+    const isSwitch = workedOnOthers.length > 0 || (a.workedOnCardIdsToday.length === 0 && a.previousCardId !== null && a.previousCardId !== card.id);
+    const penalty = isSwitch ? 1 : 0;
+
+    const netCapacity = a.remainingCapacity - penalty;
+
+    // If blocked, needs at least 2 capacity points. If not blocked, needs at least 1 (or 2 if helper)
+    if (card.isBlocked) return netCapacity >= 2;
+    
+    const isHelper = card.assignedAvatars.length > 0 && !card.assignedAvatars.includes(a.id);
+    if (isHelper) {
+      // Helper needs at least 2 capacity points to generate 1 progress point
+      return netCapacity >= 2 && pairingAllowed;
+    }
+    return netCapacity >= 1;
+  });
 
   // Check if we have active effort on the card for the current column
   const activeEffortDetail = activeEffortTypes.map(type => {
@@ -35,7 +57,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
     const remaining = card.remainingEffort[type] || 0;
     if (total === 0) return null;
     return { type, remaining, total, done: total - remaining };
-  }).filter(Boolean)[0]; // get the first active effort detail
+  }).filter(Boolean)[0];
 
   const isEffortComplete = activeEffortDetail ? activeEffortDetail.remaining === 0 : true;
 
@@ -45,15 +67,9 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   const nextColumnId = currentColumnIndex < columns.length - 1 ? columns[currentColumnIndex + 1].id : null;
   const prevColumnId = currentColumnIndex > 0 ? columns[currentColumnIndex - 1].id : null;
 
-  // Toggle avatar assignment
-  const handleAvatarClick = (avatarId: string, isAssigned: boolean) => {
-    if (gamePhase !== 'dice_rolled') return; // Can only assign when dice are rolled but work not processed
-    if (isAssigned) {
-      onAssignAvatar(avatarId, null);
-    } else {
-      onAssignAvatar(avatarId, card.id);
-      setShowAddMenu(false);
-    }
+  const handleAllocate = (avatarId: string) => {
+    onAllocateCapacity(avatarId, card.id);
+    setShowAddMenu(false);
   };
 
   const handleMove = (targetColumnId: string) => {
@@ -61,6 +77,72 @@ export const CardComponent: React.FC<CardComponentProps> = ({
     if (!res.success) {
       alert(res.errorMessage);
     }
+  };
+
+  // Render Option B Segmented Radial Dial
+  const renderRadialDial = () => {
+    if (!activeEffortDetail || card.columnId === 'done') return null;
+
+    const { total, done } = activeEffortDetail;
+    const radius = 18;
+    const cx = 22;
+    const cy = 22;
+    const strokeWidth = 5;
+    const circumference = 2 * Math.PI * radius;
+    const segmentAngle = 360 / total;
+    
+    // Calculate size of arc segment (e.g. total length / segments - 1.5px gap spacing)
+    const gapSpacing = 2; // pixels
+    const dashArray = `${(circumference / total) - gapSpacing} 100`;
+
+    const segments = [];
+    for (let i = 0; i < total; i++) {
+      const rotation = i * segmentAngle - 90; // Start segments at 12 o'clock
+      const isCompleted = i < done;
+      let strokeColor = 'rgba(255, 255, 255, 0.08)'; // Default empty
+
+      if (isCompleted) {
+        if (card.isBlocked) strokeColor = 'var(--text-muted)';
+        else if (card.type === 'expedite') strokeColor = 'var(--primary)';
+        else strokeColor = 'var(--accent-green)';
+      }
+
+      segments.push(
+        <circle
+          key={i}
+          cx={cx}
+          cy={cy}
+          r={radius}
+          fill="transparent"
+          stroke={strokeColor}
+          strokeWidth={strokeWidth}
+          strokeDasharray={dashArray}
+          transform={`rotate(${rotation} ${cx} ${cy})`}
+          style={{
+            transition: 'stroke 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+            filter: isCompleted && !card.isBlocked 
+              ? `drop-shadow(0 0 3px ${card.type === 'expedite' ? 'var(--primary-glow)' : 'var(--accent-green-glow)'})` 
+              : 'none'
+          }}
+        />
+      );
+    }
+
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '8px 0 12px 0' }}>
+        <svg width="44" height="44" viewBox="0 0 44 44" style={{ transform: 'rotate(0deg)' }}>
+          {segments}
+        </svg>
+        <div>
+          <div style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'capitalize', color: '#fff' }}>
+            {activeEffortDetail.type} Phase
+          </div>
+          <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
+            Remaining Effort: <strong style={{ color: card.isBlocked ? 'var(--accent-red)' : 'var(--secondary)' }}>{activeEffortDetail.remaining}</strong> of {total} pts
+          </div>
+        </div>
+      </div>
+    );
   };
 
   // Border glow based on card type and blocker status
@@ -100,7 +182,6 @@ export const CardComponent: React.FC<CardComponentProps> = ({
           {card.title}
         </h4>
         
-        {/* Expedite Badge */}
         {card.type === 'expedite' && (
           <span style={{ 
             fontSize: '0.65rem', 
@@ -139,54 +220,39 @@ export const CardComponent: React.FC<CardComponentProps> = ({
         }}>
           <AlertOctagon size={12} color="var(--accent-red)" />
           <span style={{ fontSize: '0.7rem', color: 'var(--accent-red)', fontWeight: 500 }}>
-            {card.blockerReason || 'Blocked! Need 4+ roll to resolve.'}
+            {card.blockerReason || 'Blocked! Spend 2 capacity to roll unblock.'}
           </span>
         </div>
       )}
 
-      {/* Effort Progress Bar */}
-      {activeEffortDetail && card.columnId !== 'done' && (
-        <div style={{ marginBottom: '12px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '3px' }}>
-            <span style={{ textTransform: 'capitalize' }}>{activeEffortDetail.type} Effort</span>
-            <span>{activeEffortDetail.done} / {activeEffortDetail.total} pts</span>
-          </div>
-          <div style={{ height: '5px', backgroundColor: 'rgba(255,255,255,0.08)', borderRadius: '3px', overflow: 'hidden' }}>
-            <div style={{ 
-              height: '100%', 
-              width: `${(activeEffortDetail.done / activeEffortDetail.total) * 100}%`,
-              backgroundColor: card.isBlocked ? 'var(--text-muted)' : 'var(--secondary)',
-              transition: 'width 0.3s ease'
-            }} />
-          </div>
-        </div>
-      )}
+      {/* Option B: Segmented Circular Radial Chart */}
+      {renderRadialDial()}
 
-      {/* Completed Stages Summary (If not in active column) */}
+      {/* Required summary for Ready column */}
       {card.columnId === 'ready' && (
         <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginBottom: '10px' }}>
-          Required: Analysis ({card.effort.analysis}), Dev ({card.effort.development}), Test ({card.effort.testing})
+          Effort needed: Analysis ({card.effort.analysis}), Dev ({card.effort.development}), Test ({card.effort.testing})
         </div>
       )}
 
-      {/* Actions and Assignments */}
+      {/* Actions and Capacity Assignments */}
       {card.columnId !== 'done' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           
-          {/* Developer Slots */}
+          {/* Active Assigned Devs */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>Assigned:</span>
             
-            {/* Assigned Avatars */}
             {assignedAvatars.map(avatar => {
-              // Check context penalty for visual tooltips
-              const hasSwitch = avatar.previousCardId !== null && avatar.previousCardId !== card.id;
-              const titleText = `${avatar.name} (Capacity: ${avatar.currentRoll || 0})${hasSwitch ? ' - Context Switch Penalty active!' : ''}`;
+              // Find out if they switched tasks today
+              const hasSwitch = avatar.workedOnCardIdsToday.includes(card.id) && avatar.workedOnCardIdsToday.filter(id => id !== card.id).length > 0;
+              const hasSwitchFromYesterday = avatar.workedOnCardIdsToday.includes(card.id) && avatar.workedOnCardIdsToday.length === 1 && avatar.previousCardId !== null && avatar.previousCardId !== card.id;
+              
+              const titleText = `${avatar.name} worked here today.${hasSwitch || hasSwitchFromYesterday ? ' Sufferred context switch penalty (-1 pt).' : ''}`;
               
               return (
                 <div 
                   key={avatar.id}
-                  onClick={() => handleAvatarClick(avatar.id, true)}
                   className="tooltip"
                   style={{
                     width: '24px',
@@ -199,14 +265,13 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                     justifyContent: 'center',
                     fontSize: '0.75rem',
                     fontWeight: 700,
-                    cursor: gamePhase === 'dice_rolled' ? 'pointer' : 'default',
-                    border: hasSwitch ? '2px dashed var(--accent-amber)' : '2px solid transparent',
+                    border: (hasSwitch || hasSwitchFromYesterday) ? '2px dashed var(--accent-amber)' : '2px solid transparent',
                     boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
                     position: 'relative'
                   }}
                 >
                   {avatar.name[0]}
-                  {hasSwitch && (
+                  {(hasSwitch || hasSwitchFromYesterday) && (
                     <div style={{
                       position: 'absolute',
                       top: '-4px',
@@ -222,16 +287,15 @@ export const CardComponent: React.FC<CardComponentProps> = ({
               );
             })}
 
-            {/* Unassigned Avatars Quick Add (Only shown when dice are rolled and slots available) */}
-            {gamePhase === 'dice_rolled' && (card.assignedAvatars.length < (pairingAllowed ? 2 : 1)) && unassignedAvatars.length > 0 && (
+            {/* Quick Allocate Capacity Button */}
+            {gamePhase === 'dice_rolled' && (!isEffortComplete || card.isBlocked) && availableDevs.length > 0 && (
               <div style={{ position: 'relative', display: 'inline-block' }}>
                 <button 
                   className="btn-add-avatar"
                   onClick={() => setShowAddMenu(!showAddMenu)}
                   style={{
-                    width: '24px',
-                    height: '24px',
-                    borderRadius: '50%',
+                    padding: '3px 8px',
+                    borderRadius: '12px',
                     border: '1px dashed var(--border-glass-focused)',
                     backgroundColor: 'rgba(255,255,255,0.03)',
                     color: 'var(--text-secondary)',
@@ -239,12 +303,15 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                     alignItems: 'center',
                     justifyContent: 'center',
                     cursor: 'pointer',
-                    fontSize: '0.8rem'
+                    fontSize: '0.65rem',
+                    gap: '4px'
                   }}
                 >
                   <UserPlus size={10} />
+                  <span>Allocate</span>
                 </button>
-                {/* Popover overlay for adding avatar */}
+                
+                {/* Popover overlay for allocating capacity */}
                 {showAddMenu && (
                   <div className="avatar-dropdown" style={{
                     position: 'absolute',
@@ -259,33 +326,44 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                     flexDirection: 'column',
                     gap: '4px',
                     boxShadow: '0 4px 12px rgba(0,0,0,0.5)',
-                    minWidth: '100px'
+                    minWidth: '130px'
                   }}>
-                    {unassignedAvatars.map(avatar => {
-                      const hasSwitch = avatar.previousCardId !== null && avatar.previousCardId !== card.id;
+                    {availableDevs.map(avatar => {
+                      const workedOnOthers = avatar.workedOnCardIdsToday.filter(id => id !== card.id);
+                      const isSwitch = workedOnOthers.length > 0 || (avatar.workedOnCardIdsToday.length === 0 && avatar.previousCardId !== null && avatar.previousCardId !== card.id);
+                      const isHelper = card.assignedAvatars.length > 0 && !card.assignedAvatars.includes(avatar.id);
+                      const title = isHelper ? 'Helper (50% progress rate)' : 'Lead dev (100% rate)';
+
                       return (
                         <button
                           key={avatar.id}
-                          onClick={() => handleAvatarClick(avatar.id, false)}
+                          onClick={() => handleAllocate(avatar.id)}
                           style={{
                             background: 'none',
                             border: 'none',
                             color: '#fff',
                             textAlign: 'left',
                             padding: '4px 8px',
-                            fontSize: '0.7rem',
+                            fontSize: '0.68rem',
                             cursor: 'pointer',
                             borderRadius: '3px',
                             display: 'flex',
-                            alignItems: 'center',
-                            gap: '6px'
+                            flexDirection: 'column',
+                            gap: '2px'
                           }}
                           onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.05)'}
                           onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                         >
-                          <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: avatar.color }} />
-                          {avatar.name} ({avatar.currentRoll || 0})
-                          {hasSwitch && <span style={{ color: 'var(--accent-amber)', fontSize: '0.6rem' }}>*</span>}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
+                            <span style={{ display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', backgroundColor: avatar.color }} />
+                            {avatar.name}
+                          </div>
+                          <div style={{ fontSize: '0.58rem', color: 'var(--text-secondary)', marginLeft: '14px' }}>
+                            Avail: {avatar.remainingCapacity} pt{avatar.remainingCapacity !== 1 ? 's' : ''} {isSwitch ? '(-1 penalty)' : ''}
+                          </div>
+                          <div style={{ fontSize: '0.55rem', color: isHelper ? 'var(--secondary)' : 'var(--accent-green)', marginLeft: '14px', fontStyle: 'italic' }}>
+                            {title}
+                          </div>
                         </button>
                       );
                     })}
@@ -294,13 +372,15 @@ export const CardComponent: React.FC<CardComponentProps> = ({
               </div>
             )}
 
-            {/* No Capacity note */}
-            {gamePhase === 'dice_rolled' && unassignedAvatars.length === 0 && card.assignedAvatars.length === 0 && (
-              <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>No active developers available</span>
+            {/* No available capacity warning */}
+            {gamePhase === 'dice_rolled' && (!isEffortComplete || card.isBlocked) && availableDevs.length === 0 && card.assignedAvatars.length === 0 && (
+              <span style={{ fontSize: '0.65rem', color: 'var(--accent-amber)', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: '2px' }}>
+                <ShieldAlert size={10} /> No capacity or switch limits reached
+              </span>
             )}
           </div>
 
-          {/* Movement Buttons (Since drag-and-drop is cooler but buttons are 100% reliable) */}
+          {/* Movement Actions */}
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', marginTop: '4px' }}>
             {prevColumnId && (
               <button 
@@ -312,7 +392,6 @@ export const CardComponent: React.FC<CardComponentProps> = ({
               </button>
             )}
             
-            {/* Pull Forward (Highlight if effort completed) */}
             {nextColumnId && (
               <button 
                 onClick={() => handleMove(nextColumnId)}

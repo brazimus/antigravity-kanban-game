@@ -43,6 +43,8 @@ export interface Avatar {
   assignedCardId: string | null;
   previousCardId: string | null; // Tracked to calculate context-switching penalty
   spentCapacity: number;
+  remainingCapacity: number;
+  workedOnCardIdsToday: string[];
 }
 
 export interface DailyLog {
@@ -91,4 +93,8 @@ export interface GameState {
   rolledToday: boolean;
   currentDayEvent: ScenarioDayEvent | null;
   eventLogs: string[];
+  snapshotAtDayStart?: {
+    cards: Card[];
+    avatars: Avatar[];
+  };
 }

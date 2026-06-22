@@ -13,7 +13,8 @@ function App() {
     gameState,
     startGame,
     rollDice,
-    assignAvatar,
+    allocateCapacity,
+    resetDailyWork,
     moveCard,
     endDay,
     startNextDay
@@ -244,7 +245,7 @@ function App() {
                     cards={gameState.cards}
                     avatars={gameState.avatars}
                     pairingAllowed={gameState.pairingAllowed}
-                    onAssignAvatar={assignAvatar}
+                    onAllocateCapacity={allocateCapacity}
                     onMoveCard={moveCard}
                     gamePhase={gameState.gamePhase}
                   />
@@ -258,6 +259,7 @@ function App() {
                     onEndDay={endDay}
                     onStartNextDay={startNextDay}
                     onRestartGame={startGame}
+                    onResetDailyWork={resetDailyWork}
                   />
                 </div>
               </>
