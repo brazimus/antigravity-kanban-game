@@ -7,11 +7,14 @@ interface CardComponentProps {
   avatars: Avatar[];
   columns: Column[];
   pairingAllowed: boolean;
-  onAllocateCapacity: (avatarId: string, cardId: string) => void;
+  onAllocateCapacity: (avatarId: string, cardId: string, effortType?: 'analysis' | 'development' | 'testing') => void;
   onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string } | Promise<{ success: boolean; errorMessage: string }>;
   gamePhase: string;
   currentPlayerId?: string | null;
   isAdmin?: boolean;
+  onSplitEpic?: (epicId: string) => void;
+  shiftLeftActive?: boolean;
+  swarmingActive?: boolean;
 }
 
 export const CardComponent: React.FC<CardComponentProps> = ({
@@ -23,9 +26,13 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   onMoveCard,
   gamePhase,
   currentPlayerId = null,
-  isAdmin = false
+  isAdmin = false,
+  onSplitEpic,
+  shiftLeftActive = false,
+  swarmingActive = false
 }) => {
   const [showAddMenu, setShowAddMenu] = useState(false);
+  const [selectedShiftLeftEffort, setSelectedShiftLeftEffort] = useState<'development' | 'testing'>('development');
   const currentColumn = columns.find(col => col.id === card.columnId);
   const activeEffortTypes = currentColumn?.allowedEffortTypes || [];
 
@@ -66,7 +73,9 @@ export const CardComponent: React.FC<CardComponentProps> = ({
     return { type, remaining, total, done: total - remaining };
   }).filter(Boolean)[0];
 
-  const isEffortComplete = activeEffortDetail ? activeEffortDetail.remaining === 0 : true;
+  const isEffortComplete = shiftLeftActive && card.columnId === 'development'
+    ? ((card.remainingEffort.development || 0) === 0 && (card.remainingEffort.testing || 0) === 0)
+    : (activeEffortDetail ? activeEffortDetail.remaining === 0 : true);
 
   // Find next column options
   const columnOrder = columns.map(c => c.id);
@@ -75,7 +84,11 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   const prevColumnId = currentColumnIndex > 0 ? columns[currentColumnIndex - 1].id : null;
 
   const handleAllocate = (avatarId: string) => {
-    onAllocateCapacity(avatarId, card.id);
+    if (shiftLeftActive && card.columnId === 'development') {
+      onAllocateCapacity(avatarId, card.id, selectedShiftLeftEffort);
+    } else {
+      onAllocateCapacity(avatarId, card.id);
+    }
     setShowAddMenu(false);
   };
 
@@ -88,73 +101,131 @@ export const CardComponent: React.FC<CardComponentProps> = ({
 
   // Render Option B Segmented Radial Dial
   const renderRadialDial = () => {
-    if (!activeEffortDetail || card.columnId === 'done') return null;
+    if (card.columnId === 'done') return null;
 
-    const { total, done } = activeEffortDetail;
-    const radius = 18;
-    const cx = 22;
-    const cy = 22;
-    const strokeWidth = 5;
-    const circumference = 2 * Math.PI * radius;
-    const segmentAngle = 360 / total;
-    
-    // Calculate size of arc segment (e.g. total length / segments - 1.5px gap spacing)
-    const gapSpacing = 2; // pixels
-    const dashArray = `${(circumference / total) - gapSpacing} 100`;
+    const renderSingleDial = (type: 'development' | 'testing' | 'analysis', total: number, done: number, isSelectable: boolean) => {
+      if (total === 0) return null;
+      const remaining = total - done;
+      const radius = 18;
+      const cx = 22;
+      const cy = 22;
+      const strokeWidth = 5;
+      const circumference = 2 * Math.PI * radius;
+      const segmentAngle = 360 / total;
+      const gapSpacing = 2; // pixels
+      const dashArray = `${(circumference / total) - gapSpacing} 100`;
 
-    const segments = [];
-    for (let i = 0; i < total; i++) {
-      const rotation = i * segmentAngle - 90; // Start segments at 12 o'clock
-      const isCompleted = i < done;
-      let strokeColor = 'rgba(255, 255, 255, 0.08)'; // Default empty
+      const segments = [];
+      for (let i = 0; i < total; i++) {
+        const rotation = i * segmentAngle - 90;
+        const isCompleted = i < done;
+        let strokeColor = 'rgba(255, 255, 255, 0.08)';
 
-      if (isCompleted) {
-        if (card.isBlocked) strokeColor = 'var(--text-muted)';
-        else if (card.type === 'expedite') strokeColor = 'var(--primary)';
-        else strokeColor = 'var(--accent-green)';
+        if (isCompleted) {
+          if (card.isBlocked) strokeColor = 'var(--text-muted)';
+          else if (card.type === 'expedite') strokeColor = 'var(--primary)';
+          else strokeColor = type === 'development' ? 'var(--secondary)' : 'var(--accent-green)';
+        }
+
+        segments.push(
+          <circle
+            key={i}
+            cx={cx}
+            cy={cy}
+            r={radius}
+            fill="transparent"
+            stroke={strokeColor}
+            strokeWidth={strokeWidth}
+            strokeDasharray={dashArray}
+            transform={`rotate(${rotation} ${cx} ${cy})`}
+            style={{
+              transition: 'stroke 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
+              filter: isCompleted && !card.isBlocked 
+                ? `drop-shadow(0 0 3px ${card.type === 'expedite' ? 'var(--primary-glow)' : 'var(--accent-green-glow)'})` 
+                : 'none'
+            }}
+          />
+        );
       }
 
-      segments.push(
-        <circle
-          key={i}
-          cx={cx}
-          cy={cy}
-          r={radius}
-          fill="transparent"
-          stroke={strokeColor}
-          strokeWidth={strokeWidth}
-          strokeDasharray={dashArray}
-          transform={`rotate(${rotation} ${cx} ${cy})`}
+      const isSelected = selectedShiftLeftEffort === type;
+
+      return (
+        <div 
+          onClick={() => isSelectable && (type === 'development' || type === 'testing') && setSelectedShiftLeftEffort(type)}
           style={{
-            transition: 'stroke 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
-            filter: isCompleted && !card.isBlocked 
-              ? `drop-shadow(0 0 3px ${card.type === 'expedite' ? 'var(--primary-glow)' : 'var(--accent-green-glow)'})` 
-              : 'none'
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            padding: isSelectable ? '6px 10px' : '0',
+            borderRadius: 'var(--radius-sm)',
+            border: isSelectable 
+              ? (isSelected ? '1px solid var(--primary)' : '1px solid rgba(255, 255, 255, 0.05)') 
+              : 'none',
+            backgroundColor: isSelectable && isSelected ? 'rgba(99, 102, 241, 0.08)' : 'transparent',
+            cursor: isSelectable ? 'pointer' : 'default',
+            transition: 'all 0.2s ease',
+            flex: 1,
+            minWidth: 0
           }}
-        />
+        >
+          <svg width="40" height="40" viewBox="0 0 44 44" style={{ flexShrink: 0 }}>
+            {segments}
+          </svg>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, textTransform: 'capitalize', color: isSelected && isSelectable ? 'var(--primary)' : '#fff', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {type} {isSelectable ? (isSelected ? '●' : '○') : ''}
+            </div>
+            <div style={{ fontSize: '0.6rem', color: 'var(--text-secondary)' }}>
+              {remaining} / {total} left
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    if (shiftLeftActive && card.columnId === 'development') {
+      const devTotal = card.effort.development || 0;
+      const devRemaining = card.remainingEffort.development || 0;
+      const devDone = devTotal - devRemaining;
+
+      const testTotal = card.effort.testing || 0;
+      const testRemaining = card.remainingEffort.testing || 0;
+      const testDone = testTotal - testRemaining;
+
+      return (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', margin: '8px 0 12px 0' }}>
+          <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.02em' }}>
+            Shift-Left Concurrent Efforts:
+          </span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            {renderSingleDial('development', devTotal, devDone, devRemaining > 0)}
+            {renderSingleDial('testing', testTotal, testDone, testRemaining > 0)}
+          </div>
+        </div>
       );
     }
 
+    if (!activeEffortDetail) return null;
+    const { type, total, done } = activeEffortDetail;
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '8px 0 12px 0' }}>
-        <svg width="44" height="44" viewBox="0 0 44 44" style={{ transform: 'rotate(0deg)' }}>
-          {segments}
-        </svg>
-        <div>
-          <div style={{ fontSize: '0.75rem', fontWeight: 600, textTransform: 'capitalize', color: '#fff' }}>
-            {activeEffortDetail.type} Phase
-          </div>
-          <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>
-            Remaining Effort: <strong style={{ color: card.isBlocked ? 'var(--accent-red)' : 'var(--secondary)' }}>{activeEffortDetail.remaining}</strong> of {total} pts
-          </div>
-        </div>
+        {renderSingleDial(type as any, total, done, false)}
       </div>
     );
   };
 
+  // Determine if this card has any developers who suffered a context switch penalty today
+  const hasCardPenalty = !swarmingActive && assignedAvatars.some(avatar => {
+    const workedOnOthers = avatar.workedOnCardIdsToday.filter(id => id !== card.id);
+    const hasSwitchToday = workedOnOthers.length > 0;
+    const hasSwitchFromYesterday = avatar.workedOnCardIdsToday.includes(card.id) && avatar.workedOnCardIdsToday.length === 1 && avatar.previousCardId !== null && avatar.previousCardId !== card.id;
+    return hasSwitchToday || hasSwitchFromYesterday;
+  });
+
   // Border glow based on card type and blocker status
   let cardClass = "glass-panel kanban-card";
-  if (card.isBlocked) cardClass += " card-blocked pulse-red";
+  if (card.isBlocked) cardClass += " card-blocked";
   else if (card.type === 'expedite') cardClass += " card-expedite pulse-primary";
 
   return (
@@ -173,6 +244,8 @@ export const CardComponent: React.FC<CardComponentProps> = ({
         : card.type === 'expedite' 
           ? '4px solid var(--primary)' 
           : '4px solid var(--secondary)',
+      outline: hasCardPenalty ? '2px dashed var(--accent-amber)' : 'none',
+      boxShadow: hasCardPenalty ? '0 0 10px rgba(245, 158, 11, 0.2)' : 'none'
     }}>
       
       {/* Card Header */}
@@ -212,6 +285,47 @@ export const CardComponent: React.FC<CardComponentProps> = ({
       }}>
         {card.description}
       </p>
+
+      {/* Parent Epic Reference badge */}
+      {card.parentEpicId && (
+        <div style={{
+          display: 'inline-block',
+          fontSize: '0.65rem',
+          backgroundColor: 'rgba(99, 102, 241, 0.05)',
+          color: 'var(--secondary)',
+          padding: '2px 6px',
+          borderRadius: '4px',
+          border: '1px solid rgba(99, 102, 241, 0.2)',
+          fontWeight: 600,
+          marginBottom: '10px'
+        }}>
+          Part of: {card.title.split(' - ')[0] || 'Trade Show Demo Epic'}
+        </div>
+      )}
+
+      {/* Split Epic manual action button */}
+      {card.isEpic && (card.columnId === 'backlog' || card.columnId === 'ready') && onSplitEpic && (
+        <button
+          className="btn btn-secondary"
+          onClick={() => onSplitEpic(card.id)}
+          style={{
+            width: '100%',
+            padding: '6px 10px',
+            fontSize: '0.75rem',
+            marginBottom: '10px',
+            borderRadius: 'var(--radius-sm)',
+            fontWeight: 700,
+            background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)',
+            border: 'none',
+            color: '#fff',
+            cursor: 'pointer',
+            justifyContent: 'center',
+            display: 'flex'
+          }}
+        >
+          ✂️ Split Epic into Stories
+        </button>
+      )}
 
       {/* Blocker Reason */}
       {card.isBlocked && (
@@ -254,8 +368,9 @@ export const CardComponent: React.FC<CardComponentProps> = ({
               // Find out if they switched tasks today
               const hasSwitch = avatar.workedOnCardIdsToday.includes(card.id) && avatar.workedOnCardIdsToday.filter(id => id !== card.id).length > 0;
               const hasSwitchFromYesterday = avatar.workedOnCardIdsToday.includes(card.id) && avatar.workedOnCardIdsToday.length === 1 && avatar.previousCardId !== null && avatar.previousCardId !== card.id;
+              const showPenalty = !swarmingActive && (hasSwitch || hasSwitchFromYesterday);
               
-              const titleText = `${avatar.name} worked here today.${hasSwitch || hasSwitchFromYesterday ? ' Sufferred context switch penalty (-1 pt).' : ''}`;
+              const titleText = `${avatar.name} worked here today.${showPenalty ? ' Suffered context switch penalty (-1 pt).' : ''}`;
               
               return (
                 <div 
@@ -270,7 +385,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    border: (hasSwitch || hasSwitchFromYesterday) ? '2px dashed var(--accent-amber)' : '2px solid transparent',
+                    border: showPenalty ? '2px dashed var(--accent-amber)' : '2px solid transparent',
                     boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
                     position: 'relative',
                     padding: '3px'
@@ -280,16 +395,24 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                     <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
                     <circle cx="12" cy="7" r="4" />
                   </svg>
-                  {(hasSwitch || hasSwitchFromYesterday) && (
+                  {showPenalty && (
                     <div style={{
                       position: 'absolute',
-                      top: '-4px',
-                      right: '-4px',
-                      width: '8px',
-                      height: '8px',
-                      borderRadius: '50%',
-                      backgroundColor: 'var(--accent-amber)'
-                    }} />
+                      top: '-6px',
+                      right: '-8px',
+                      backgroundColor: 'var(--accent-amber)',
+                      color: '#000',
+                      fontSize: '0.55rem',
+                      fontWeight: 800,
+                      borderRadius: '4px',
+                      padding: '1px 3px',
+                      lineHeight: 1,
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.5)',
+                      whiteSpace: 'nowrap',
+                      zIndex: 5
+                    }}>
+                      -1 Pt
+                    </div>
                   )}
                   <span className="tooltiptext">{titleText}</span>
                 </div>

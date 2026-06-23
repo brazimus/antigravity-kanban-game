@@ -224,5 +224,205 @@ describe('useGameState Hook', () => {
     const logEntry = result.current.gameState.eventLogs[result.current.gameState.eventLogs.length - 1];
     expect(logEntry).toContain('[Backlog] Replenished backlog with:');
   });
+
+  it('should transition to week_summary phase on Day 5', () => {
+    const { result } = renderHook(() => useGameState());
+    act(() => {
+      result.current.startGame();
+    });
+
+    for (let day = 1; day < 5; day++) {
+      act(() => {
+        result.current.rollDice();
+      });
+      act(() => {
+        result.current.endDay();
+      });
+      act(() => {
+        result.current.startNextDay();
+      });
+    }
+
+    // Now on Day 5
+    expect(result.current.gameState.day).toBe(5);
+    expect(result.current.gameState.gamePhase).toBe('day_start');
+
+    act(() => {
+      result.current.rollDice();
+    });
+    act(() => {
+      result.current.endDay();
+    });
+
+    // Should transition to week_summary at end of Day 5
+    expect(result.current.gameState.gamePhase).toBe('week_summary');
+  });
+
+  it('should roll back testing cards to development when Shift-Left starts', () => {
+    const { result } = renderHook(() => useGameState());
+    act(() => {
+      result.current.startGame();
+    });
+
+    // Manually put a card in the testing column and set some progress
+    act(() => {
+      const card = result.current.gameState.cards[0];
+      card.columnId = 'testing';
+      card.effort.development = 6;
+      card.remainingEffort.development = 0;
+      card.effort.testing = 3;
+      card.remainingEffort.testing = 2;
+    });
+
+    // Advance to day 5 and reach weekend summary
+    for (let day = 1; day < 5; day++) {
+      act(() => { result.current.rollDice(); });
+      act(() => { result.current.endDay(); });
+      act(() => { result.current.startNextDay(); });
+    }
+    // End Day 5 to reach week_summary
+    act(() => { result.current.rollDice(); });
+    act(() => { result.current.endDay(); });
+    expect(result.current.gameState.gamePhase).toBe('week_summary');
+
+    // Launch next week with Shift-Left active
+    act(() => {
+      result.current.startNextDay({ shiftLeftActive: true });
+    });
+
+    // The card should now be in development column
+    const migratedCard = result.current.gameState.cards[0];
+    expect(migratedCard.columnId).toBe('development');
+    // Development effort should be reset to full (6)
+    expect(migratedCard.remainingEffort.development).toBe(6);
+    // Testing effort should be preserved (2)
+    expect(migratedCard.remainingEffort.testing).toBe(2);
+    expect(result.current.gameState.shiftLeftActive).toBe(true);
+  });
+
+  it('should block working on standard cards when an expedite card is active in the same column', () => {
+    const { result } = renderHook(() => useGameState());
+    act(() => {
+      result.current.startGame();
+    });
+
+    // Move a standard card to development
+    let stdCardId = '';
+    act(() => {
+      const stdCard = result.current.gameState.cards.find(c => c.columnId === 'analysis')!;
+      stdCard.columnId = 'development';
+      stdCardId = stdCard.id;
+    });
+
+    // Inject an expedite card in development
+    let expCardId = 'exp_01';
+    act(() => {
+      result.current.injectCustomExpediteCards('Security Breach', 1);
+    });
+
+    act(() => {
+      // The injected card will start in 'ready'. Let's manually move it to 'development'
+      const expCard = result.current.gameState.cards.find(c => c.type === 'expedite')!;
+      expCard.id = expCardId;
+      expCard.columnId = 'development';
+      expCard.remainingEffort.development = 2;
+    });
+
+    act(() => {
+      result.current.rollDice();
+    });
+
+    const dev = result.current.gameState.avatars[0];
+    const initialCapacity = dev.remainingCapacity;
+
+    // Attempt to allocate capacity to the standard card in development
+    act(() => {
+      result.current.allocateCapacity(dev.id, stdCardId);
+    });
+
+    // Allocation should be blocked: developer capacity is unchanged
+    const updatedDev = result.current.gameState.avatars.find(a => a.id === dev.id)!;
+    expect(updatedDev.remainingCapacity).toBe(initialCapacity);
+    expect(result.current.gameState.eventLogs[result.current.gameState.eventLogs.length - 1]).toContain('Cannot work on standard card');
+
+    // Attempt to allocate capacity to the expedite card in development
+    act(() => {
+      result.current.allocateCapacity(dev.id, expCardId);
+    });
+
+    // Allocation should succeed: developer capacity is reduced
+    const devAfterExp = result.current.gameState.avatars.find(a => a.id === dev.id)!;
+    expect(devAfterExp.remainingCapacity).toBeLessThan(initialCapacity);
+  });
+
+  it('should handle story splitting Epic into child cards and roll up progress', () => {
+    const { result } = renderHook(() => useGameState());
+    act(() => {
+      result.current.startGame();
+    });
+
+    // Setup an Epic card in Ready
+    let epicId = '';
+    act(() => {
+      const epicCard = result.current.gameState.cards[0];
+      epicCard.isEpic = true;
+      epicCard.type = 'epic';
+      epicCard.columnId = 'ready';
+      epicId = epicCard.id;
+    });
+
+    // Split the Epic
+    act(() => {
+      result.current.splitEpic(epicId);
+    });
+
+    // Epic card should now be in 'epic_pool' and 3 child cards should be in 'ready'
+    const updatedEpic = result.current.gameState.cards.find(c => c.id === epicId)!;
+    expect(updatedEpic.columnId).toBe('epic_pool');
+    expect(updatedEpic.epicProgress).toBe(0);
+    expect(updatedEpic.childCardIds?.length).toBe(3);
+
+    // Complete one child card (move to done)
+    act(() => {
+      const childCards = result.current.gameState.cards.filter(c => c.parentEpicId === epicId);
+      childCards[0].columnId = 'done';
+      childCards[0].completedAt = result.current.gameState.day;
+    });
+
+    // End day to trigger rollup progress
+    act(() => {
+      result.current.rollDice();
+    });
+    act(() => {
+      result.current.endDay();
+    });
+
+    // Epic progress should be 33%
+    const epicAfterDay1 = result.current.gameState.cards.find(c => c.id === epicId)!;
+    expect(epicAfterDay1.epicProgress).toBe(33);
+    expect(epicAfterDay1.columnId).toBe('epic_pool');
+
+    // Complete the remaining child cards
+    act(() => {
+      const childCards = result.current.gameState.cards.filter(c => c.parentEpicId === epicId);
+      childCards[1].columnId = 'done';
+      childCards[1].completedAt = result.current.gameState.day;
+      childCards[2].columnId = 'done';
+      childCards[2].completedAt = result.current.gameState.day;
+    });
+
+    // End day to trigger rollup progress again
+    act(() => {
+      result.current.rollDice();
+    });
+    act(() => {
+      result.current.endDay();
+    });
+
+    // Epic progress should be 100% and it should move to done column
+    const epicAfterDay2 = result.current.gameState.cards.find(c => c.id === epicId)!;
+    expect(epicAfterDay2.epicProgress).toBe(100);
+    expect(epicAfterDay2.columnId).toBe('done');
+  });
 });
 

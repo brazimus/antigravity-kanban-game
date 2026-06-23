@@ -1,4 +1,4 @@
-export type CardType = 'standard' | 'expedite' | 'blocker';
+export type CardType = 'standard' | 'expedite' | 'blocker' | 'epic';
 
 export interface CardStageEffort {
   analysis: number;
@@ -26,6 +26,10 @@ export interface Card {
     day: number;
     columnId: string;
   }[];
+  isEpic?: boolean;
+  parentEpicId?: string;
+  childCardIds?: string[];
+  epicProgress?: number;
 }
 
 export interface Column {
@@ -54,6 +58,10 @@ export interface DailyLog {
   cumulativeThroughput: number; // Total cards completed up to this day
   averageCycleTime: number | null; // Average cycle time of completed cards up to this day
   averageLeadTime: number | null; // Average lead time of completed cards up to this day
+  wipLimitsActive?: boolean;
+  shiftLeftActive?: boolean;
+  swarmingActive?: boolean;
+  smallerBatchesActive?: boolean;
 }
 
 export interface ScenarioDayEvent {
@@ -80,6 +88,15 @@ export interface Scenario {
   events: { [day: number]: ScenarioDayEvent };
 }
 
+export interface GameConfig {
+  maxDays: number;
+  blockerChance: number;             // e.g. 0.15
+  qaFailChanceUnpaired: number;      // e.g. 0.20
+  qaFailChancePaired: number;        // e.g. 0.02
+  unblockCost: number;               // e.g. 2
+  pairingHelpCost: number;           // e.g. 2
+}
+
 export interface GameState {
   day: number;
   maxDays: number;
@@ -89,7 +106,7 @@ export interface GameState {
   dailyLogs: DailyLog[];
   activeScenarioId: string;
   pairingAllowed: boolean;
-  gamePhase: 'intro' | 'day_start' | 'dice_rolled' | 'work_allocated' | 'day_summary' | 'game_over';
+  gamePhase: 'intro' | 'day_start' | 'dice_rolled' | 'work_allocated' | 'day_summary' | 'week_summary' | 'game_over';
   rolledToday: boolean;
   currentDayEvent: ScenarioDayEvent | null;
   eventLogs: string[];
@@ -98,4 +115,11 @@ export interface GameState {
     avatars: Avatar[];
   };
   nextEventId?: string | null;
+  wipLimitsActive?: boolean;
+  shiftLeftActive?: boolean;
+  swarmingActive?: boolean;
+  smallerBatchesActive?: boolean;
+  config?: GameConfig;
+  customEventTitle?: string;
+  customEventCount?: number;
 }

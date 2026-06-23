@@ -8,6 +8,7 @@ import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { 
   LayoutGrid, BarChart3, Play, HelpCircle 
 } from 'lucide-react';
+import type { GameConfig } from './types';
 import './App.css';
 
 function App() {
@@ -17,12 +18,13 @@ function App() {
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
+  const [pendingConfig, setPendingConfig] = useState<GameConfig | undefined>(undefined);
 
   // Instantiating the two state engines.
   // singleEngine: runs purely in-memory (local state hashes) for offline single-player.
   // multiEngine: sets up reactive Firestore listeners and transactional mutations for cloud sync.
   const singleEngine = useGameState();
-  const multiEngine = useMultiplayerState(roomCode, currentPlayerId, isAdmin);
+  const multiEngine = useMultiplayerState(roomCode, currentPlayerId, isAdmin, pendingConfig);
 
   const isMulti = mode === 'multi' && roomCode !== null;
 
@@ -42,7 +44,11 @@ function App() {
     endDay,
     startNextDay,
     replenishBacklog,
-    startGame
+    startGame,
+    fastForwardToWeekEnd,
+    injectCustomExpediteCards,
+    splitEpic,
+    queueEvent
   } = activeEngine;
 
   const [activeTab, setActiveTab] = useState<'board' | 'metrics'>('board');
@@ -236,7 +242,10 @@ function App() {
               setCurrentPlayerId(playerId);
               setIsAdmin(false);
             }}
-            onJoinAsAdmin={(code, adminId, _isNew, _scenarioId) => {
+            onJoinAsAdmin={(code, adminId, _isNew, _scenarioId, config) => {
+              if (config) {
+                setPendingConfig(config);
+              }
               setRoomCode(code);
               setCurrentPlayerId(adminId);
               setIsAdmin(true);
@@ -357,6 +366,7 @@ function App() {
                     onReplenishBacklog={replenishBacklog}
                     currentPlayerId={currentPlayerId}
                     isAdmin={isAdmin}
+                    onSplitEpic={splitEpic}
                   />
                 </div>
 
@@ -371,7 +381,9 @@ function App() {
                     onResetDailyWork={resetDailyWork}
                     isMultiplayer={mode === 'multi'}
                     isAdmin={isAdmin}
-                    onQueueEvent={isMulti ? multiEngine.queueEvent : undefined}
+                    onQueueEvent={queueEvent}
+                    onFastForward={fastForwardToWeekEnd}
+                    onInjectCustomExpediteCards={injectCustomExpediteCards}
                   />
                 </div>
               </>

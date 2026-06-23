@@ -11,7 +11,7 @@ import {
   writeBatch
 } from 'firebase/firestore';
 import { db, auth } from './firebase';
-import type { GameState, Card, Avatar, DailyLog } from './types';
+import type { GameState, Card, Avatar, DailyLog, GameConfig } from './types';
 import { defaultColumns } from './scenarios';
 
 // Random card templates for manual backlog replenishment or dynamic events
@@ -32,7 +32,7 @@ const MULTIPLAYER_CARD_POOL = [
   { title: 'Fix CSS Grid Layout on Safari', description: 'Resolve flexbox wrap visual bugs on iOS devices.' }
 ];
 
-export const useMultiplayerState = (roomCode: string | null, currentPlayerId: string | null, isAdmin: boolean) => {
+export const useMultiplayerState = (roomCode: string | null, currentPlayerId: string | null, isAdmin: boolean, initialConfig?: GameConfig) => {
   const [gameState, setGameState] = useState<GameState>({
     day: 1,
     maxDays: 10,
@@ -45,7 +45,11 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     gamePhase: 'intro',
     rolledToday: false,
     currentDayEvent: null,
-    eventLogs: []
+    eventLogs: [],
+    wipLimitsActive: false,
+    shiftLeftActive: false,
+    swarmingActive: false,
+    smallerBatchesActive: false
   });
 
   const [loading, setLoading] = useState(true);
@@ -54,8 +58,17 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
   const generateId = () => Math.random().toString(36).substring(2, 9);
 
   // Create a Brand New Game Session (Admin Only)
-  const createRoom = useCallback(async (scenarioId: string) => {
+  const createRoom = useCallback(async (scenarioId: string, customConfig?: GameConfig) => {
     if (!roomCode) return;
+
+    const finalConfig: GameConfig = customConfig || initialConfig || {
+      maxDays: 10,
+      blockerChance: 0.15,
+      qaFailChanceUnpaired: 0.20,
+      qaFailChancePaired: 0.02,
+      unblockCost: 2,
+      pairingHelpCost: 2
+    };
 
     const gameDocRef = doc(db, 'games', roomCode);
     const initialCards: Card[] = [
@@ -131,7 +144,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     batch.set(gameDocRef, {
       adminId: auth.currentUser?.uid,
       day: 1,
-      maxDays: 10,
+      maxDays: finalConfig.maxDays,
       gamePhase: 'day_start',
       status: 'active',
       activeScenarioId: scenarioId,
@@ -142,7 +155,13 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         description: 'Welcome to the team! Instructor coordinates the days. There are no WIP limits yet. Try to get as many cards as possible into Development to start working!'
       },
       nextEventId: null,
-      eventLogs: ['--- Project Started in Multiplayer Mode ---']
+      eventLogs: ['--- Project Started in Multiplayer Mode ---'],
+      config: finalConfig,
+      createdAt: Date.now(),
+      wipLimitsActive: false,
+      shiftLeftActive: false,
+      swarmingActive: false,
+      smallerBatchesActive: false
     });
 
     // Save Initial Cards
@@ -152,7 +171,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     });
 
     await batch.commit();
-  }, [roomCode]);
+  }, [roomCode, initialConfig]);
 
   /**
    * REAL-TIME SYNCHRONIZATION EVENT LOOPS (Analogous to continuous database cursors)
@@ -191,12 +210,17 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
           pairingAllowed: data.pairingAllowed || false,
           dailyLogs: data.dailyLogs || [],
           currentDayEvent: data.currentDayEvent || null,
-          eventLogs: data.eventLogs || []
+          eventLogs: data.eventLogs || [],
+          wipLimitsActive: data.wipLimitsActive || false,
+          shiftLeftActive: data.shiftLeftActive || false,
+          swarmingActive: data.swarmingActive || false,
+          smallerBatchesActive: data.smallerBatchesActive || false,
+          config: data.config || undefined
         }));
       } else if (isAdmin) {
         // Document does not exist and current user is admin, initialize the room
         try {
-          await createRoom('easy_mode');
+          await createRoom('easy_mode', initialConfig);
         } catch (err) {
           console.error("Auto room creation failed:", err);
         }
@@ -241,6 +265,38 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         const c = docSnap.data() as Card;
         cardsList.push(c);
       });
+
+      // Reactively rollup Epic progress (Admin Only)
+      if (isAdmin && roomCode) {
+        (async () => {
+          const epics = cardsList.filter(c => c.isEpic || c.type === 'epic');
+          for (const epic of epics) {
+            const children = cardsList.filter(c => c.parentEpicId === epic.id);
+            if (children.length > 0) {
+              const completed = children.filter(c => c.columnId === 'done').length;
+              const progress = Math.round((completed / children.length) * 100);
+              
+              if (progress !== (epic.epicProgress || 0)) {
+                const epicRef = doc(db, 'games', roomCode, 'cards', epic.id);
+                const updates: any = { epicProgress: progress };
+                
+                if (progress === 100 && epic.columnId !== 'done') {
+                  updates.columnId = 'done';
+                  updates.completedAt = gameState.day;
+                  updates.history = [...(epic.history || []), { day: gameState.day, columnId: 'done' }];
+                }
+                
+                try {
+                  await updateDoc(epicRef, updates);
+                } catch (e) {
+                  console.error("Failed to update parent epic progress:", e);
+                }
+              }
+            }
+          }
+        })();
+      }
+
       setGameState(prev => ({ ...prev, cards: cardsList }));
     });
 
@@ -300,7 +356,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
    * calculates the delta, and commits writes ONLY if the documents were not modified in the meantime.
    * If a concurrent modification occurs, the transaction automatically rolls back and retries.
    */
-  const allocateCapacity = useCallback(async (avatarId: string, cardId: string) => {
+  const allocateCapacity = useCallback(async (avatarId: string, cardId: string, effortType?: 'analysis' | 'development' | 'testing') => {
     if (!roomCode || !currentPlayerId) return;
     if (avatarId !== currentPlayerId) return; // Can only spend own capacity!
 
@@ -309,6 +365,12 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     const gameRef = doc(db, 'games', roomCode);
 
     try {
+      // Fetch all card docs to enforce the Expedite Urgency Constraint
+      const cardsColRef = collection(db, 'games', roomCode, 'cards');
+      const cardsSnap = await getDocs(cardsColRef);
+      const cardsList: Card[] = [];
+      cardsSnap.forEach(snap => cardsList.push(snap.data() as Card));
+
       await runTransaction(db, async (transaction) => {
         const playerSnap = await transaction.get(playerRef);
         const cardSnap = await transaction.get(cardRef);
@@ -320,38 +382,74 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         const card = cardSnap.data() as Card;
         const game = gameSnap.data();
 
-        // 1. Identify active effort phase
+        // 1. Expedite Urgency Constraint
+        if (card.type !== 'epic' && card.type !== 'expedite') {
+          const hasExpediteInColumn = cardsList.some(
+            c => c.columnId === card.columnId && 
+                 c.type === 'expedite' && 
+                 ((c.remainingEffort.analysis || 0) > 0 || (c.remainingEffort.development || 0) > 0 || (c.remainingEffort.testing || 0) > 0)
+          );
+          if (hasExpediteInColumn) {
+            // Block allocation
+            const gameLogs = [...game.eventLogs, `[Blocked] Cannot work on standard card "${card.title}" while an EXPEDITE card is active in the ${card.columnId.toUpperCase()} column.`];
+            transaction.update(gameRef, { eventLogs: gameLogs });
+            return;
+          }
+        }
+
+        // 2. Identify active effort phase
         const activeColumn = defaultColumns.find(col => col.id === card.columnId);
-        const activeEffortType = activeColumn?.allowedEffortTypes[0];
-        if (!activeEffortType) return;
+        if (!activeColumn) return;
+
+        // Determine allowed effort types based on Shift-Left
+        const allowedEfforts = game.shiftLeftActive && card.columnId === 'development'
+          ? ['development', 'testing']
+          : activeColumn.allowedEffortTypes;
+
+        let activeEffortType = effortType;
+        if (!activeEffortType) {
+          activeEffortType = allowedEfforts.find(
+            type => (card.remainingEffort[type] || 0) > 0
+          ) as 'analysis' | 'development' | 'testing';
+        }
+
+        if (!activeEffortType || !allowedEfforts.includes(activeEffortType)) return;
 
         const effortRemaining = card.remainingEffort[activeEffortType] || 0;
         if (effortRemaining <= 0) return; // already completed stage
 
-        // 2. Context Switching Cost calculation
+        // 3. Context Switching Cost calculation
         const workedOnOthers = (player.workedOnCardIdsToday || []).filter((id: string) => id !== cardId);
         const isSwitch = workedOnOthers.length > 0 || (player.workedOnCardIdsToday.length === 0 && player.previousCardId !== null && player.previousCardId !== cardId);
-        const penalty = isSwitch ? 1 : 0;
+        let penalty = isSwitch ? 1 : 0;
+        
+        // Swarming Accelerator: context switch penalty is 0
+        if (game.swarmingActive) {
+          penalty = 0;
+        }
 
         const netCapacity = player.remainingCapacity - penalty;
         if (netCapacity <= 0) return; // No capacity left after penalty
 
-        // 3. Pairing calculation
+        // 4. Pairing calculation
         const isHelper = card.assignedAvatars.length > 0 && !card.assignedAvatars.includes(avatarId);
         let progressPoints = 0;
         let capacitySpent = 0;
 
+        const configUnblockCost = game.config?.unblockCost ?? 2;
+        const configPairingCost = game.config?.pairingHelpCost ?? 2;
+
         if (card.isBlocked) {
-          // If blocked, student spends 2 capacity to generate 1 point of progress (clears blocker)
-          if (netCapacity >= 2) {
+          // If blocked, student spends unblockCost to generate 1 point of progress (clears blocker)
+          if (netCapacity >= configUnblockCost) {
             progressPoints = 1;
-            capacitySpent = 2 + penalty;
+            capacitySpent = configUnblockCost + penalty;
           }
         } else if (isHelper) {
-          // Helper spends 2 capacity points to generate 1 progress point
-          if (netCapacity >= 2 && game.pairingAllowed) {
+          // Helper spends pairingHelpCost points to generate 1 progress point
+          if (netCapacity >= configPairingCost && (game.pairingAllowed || game.wipLimitsActive)) {
             progressPoints = 1;
-            capacitySpent = 2 + penalty;
+            capacitySpent = configPairingCost + penalty;
           }
         } else {
           // Standard: 1 capacity spent = 1 effort point progressed
@@ -361,12 +459,11 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
 
         if (capacitySpent === 0) return;
 
-        // 4. Update data structures
+        // 5. Update data structures
         const updatedRemainingEffort = { ...card.remainingEffort };
         let wasUnblocked = false;
 
         if (card.isBlocked) {
-          updatedRemainingEffort[activeEffortType] = Math.max(0, effortRemaining - progressPoints);
           card.isBlocked = false;
           wasUnblocked = true;
         } else {
@@ -381,15 +478,31 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         // Verify if card is now assigned to this avatar
         const newAssignedAvatars = Array.from(new Set([...card.assignedAvatars, currentPlayerId]));
 
-        // Check QA Failures if development completed
+        // Check QA Failures if development completed (bypassed if Shift-Left is active)
         let qaLogs = '';
         if (activeEffortType === 'development' && updatedRemainingEffort.development === 0) {
-          // 20% QA failure check
-          if (Math.random() < 0.20) {
-            updatedRemainingEffort.development = card.effort.development; // Reset dev effort
-            card.failedQACount += 1;
-            qaLogs = ` [QA Failure] Card "${card.title}" failed QA tests and requires developer rework!`;
+          if (game.shiftLeftActive) {
+            // Built-in quality: QA rework completely bypassed
+          } else {
+            const qaFailChanceUnpaired = game.config?.qaFailChanceUnpaired ?? 0.20;
+            const qaFailChancePaired = game.config?.qaFailChancePaired ?? 0.02;
+            const isPaired = newAssignedAvatars.length > 1;
+            const qaChance = isPaired ? qaFailChancePaired : qaFailChanceUnpaired;
+
+            if (Math.random() < qaChance) {
+              updatedRemainingEffort.development = card.effort.development; // Reset dev effort
+              card.failedQACount += 1;
+              qaLogs = ` [QA Failure] Card "${card.title}" failed QA tests and requires developer rework!`;
+            }
           }
+        }
+
+        // If child card is completed, check if parent Epic progress needs rollup
+        let epicLogs = '';
+        if (card.parentEpicId && Object.values(updatedRemainingEffort).reduce((a, b) => a + b, 0) === 0) {
+          // Child card completed! We will calculate parent epic completion in onSnapshot subscriber reactively,
+          // but we can log it here.
+          epicLogs = ` [Epic Progress] Child story "${card.title}" completed.`;
         }
 
         // Apply writes to transaction
@@ -408,10 +521,12 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         });
 
         // Add log entry
-        let logMsg = `[Work] ${player.name} spent ${capacitySpent} capacity points on "${card.title}"`;
-        if (isSwitch) logMsg += ` (-1 context penalty applied)`;
+        let logMsg = `[Work] ${player.name} spent ${capacitySpent} capacity points on "${card.title}" (${activeEffortType.toUpperCase()})`;
+        if (isSwitch && !game.swarmingActive) logMsg += ` (-1 context penalty applied)`;
+        if (game.swarmingActive && isSwitch) logMsg += ` (swarmed - context penalty bypassed)`;
         if (wasUnblocked) logMsg += ` [Success] Unblocked card!`;
         if (qaLogs) logMsg += qaLogs;
+        if (epicLogs) logMsg += epicLogs;
 
         transaction.update(gameRef, {
           eventLogs: [...game.eventLogs, logMsg]
@@ -648,17 +763,68 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         throughput: todayThroughput,
         cumulativeThroughput,
         averageCycleTime,
-        averageLeadTime
+        averageLeadTime,
+        wipLimitsActive: gameState.wipLimitsActive,
+        shiftLeftActive: gameState.shiftLeftActive,
+        swarmingActive: gameState.swarmingActive,
+        smallerBatchesActive: gameState.smallerBatchesActive,
       };
 
       const gameSnap = await getDoc(gameDocRef);
       if (gameSnap.exists()) {
-        const logs = [...(gameSnap.data().dailyLogs || []), newLog];
-        await updateDoc(gameDocRef, {
-          dailyLogs: logs,
-          gamePhase: 'day_summary',
-          eventLogs: [...gameSnap.data().eventLogs, `--- End of Day ${gameState.day} Summary: Completed ${todayThroughput} cards ---`]
+        const gameData = gameSnap.data();
+        const batch = writeBatch(db);
+
+        // Blocker checks for active cards that had work applied today
+        const blockerChance = gameData.config?.blockerChance ?? 0.15;
+        const isOSUpgradeActive = gameData.currentDayEvent?.title.includes('OS Upgrade');
+        // If OS upgrade is active and it's within the first 3 days of the week, blocker risk increases to 30%
+        const currentDayInWeek = (gameState.day % 5) === 0 ? 5 : (gameState.day % 5);
+        const finalBlockerChance = (isOSUpgradeActive && currentDayInWeek <= 3) ? 0.30 : blockerChance;
+
+        let blockerLogs: string[] = [];
+        activeCards.forEach(card => {
+          const workedOnToday = card.assignedAvatars.length > 0;
+          const isWorking = card.columnId !== 'backlog' && card.columnId !== 'ready' && card.columnId !== 'done' && card.columnId !== 'epic_pool';
+          
+          if (workedOnToday && isWorking && !card.isBlocked) {
+            const isPaired = card.assignedAvatars.length > 1;
+            const roll1 = Math.random();
+            const roll2 = isPaired ? Math.random() : 1.0;
+
+            if (roll1 < finalBlockerChance && roll2 < finalBlockerChance) {
+              blockerLogs.push(`[Blocker] Oh no! "${card.title}" got blocked by a quality bug.`);
+              const cardRef = doc(db, 'games', roomCode, 'cards', card.id);
+              batch.update(cardRef, {
+                isBlocked: true,
+                blockerReason: 'Quality defect: Code refactor required.'
+              });
+            } else if (roll1 < finalBlockerChance && isPaired) {
+              blockerLogs.push(`[Pairing Save] A blocker check on "${card.title}" failed, but was avoided due to paired quality validation!`);
+            }
+          }
         });
+
+        // Determine if next day would start weekend summary
+        const isWeekend = gameState.day % 5 === 0;
+        const targetPhase = isWeekend ? 'week_summary' : 'day_summary';
+
+        const logs = [
+          ...(gameData.dailyLogs || []),
+          newLog
+        ];
+        
+        batch.update(gameDocRef, {
+          dailyLogs: logs,
+          gamePhase: targetPhase,
+          eventLogs: [
+            ...gameData.eventLogs,
+            ...blockerLogs,
+            `--- End of Day ${gameState.day} Summary: Completed ${todayThroughput} cards ---`
+          ]
+        });
+
+        await batch.commit();
       }
     } catch (err) {
       console.error('End day failed:', err);
@@ -666,7 +832,12 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
   }, [roomCode, isAdmin, gameState.day]);
 
   // Start Next Day & Trigger Queued Scenarios (Admin Only)
-  const startNextDay = useCallback(async () => {
+  const startNextDay = useCallback(async (accelerators?: {
+    wipLimitsActive?: boolean;
+    shiftLeftActive?: boolean;
+    swarmingActive?: boolean;
+    smallerBatchesActive?: boolean;
+  }) => {
     if (!roomCode || !isAdmin) return;
 
     const nextDay = gameState.day + 1;
@@ -679,11 +850,36 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
       if (!gameSnap.exists()) return;
 
       const gameData = gameSnap.data();
-      let pairingAllowed = gameData.pairingAllowed;
+      let pairingAllowed = gameData.pairingAllowed || false;
       let nextEvent = null;
+
+      // Extract new or current accelerator toggles
+      let wipLimitsActive = gameData.wipLimitsActive || false;
+      let shiftLeftActive = gameData.shiftLeftActive || false;
+      let swarmingActive = gameData.swarmingActive || false;
+      let smallerBatchesActive = gameData.smallerBatchesActive || false;
+
+      if (accelerators) {
+        wipLimitsActive = !!accelerators.wipLimitsActive;
+        shiftLeftActive = !!accelerators.shiftLeftActive;
+        swarmingActive = !!accelerators.swarmingActive;
+        smallerBatchesActive = !!accelerators.smallerBatchesActive;
+        pairingAllowed = wipLimitsActive; // Pairing enabled when WIP limits are active
+      }
 
       // Reset columns limits locally
       let columnsWipConfig = [...gameState.columns];
+      if (wipLimitsActive) {
+        columnsWipConfig = columnsWipConfig.map(col => {
+          if (col.id === 'analysis') return { ...col, wipLimit: 2 };
+          if (col.id === 'development') return { ...col, wipLimit: 2 };
+          if (col.id === 'testing') return { ...col, wipLimit: 1 };
+          return col;
+        });
+      } else {
+        columnsWipConfig = columnsWipConfig.map(col => ({ ...col, wipLimit: null }));
+      }
+
       let logs = [...gameData.eventLogs, `--- Starting Day ${nextDay} ---`];
 
       // Reset players capacities in Firestore
@@ -700,9 +896,29 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         });
       });
 
+      // Shift-Left column migration check
+      if (shiftLeftActive && !gameData.shiftLeftActive) {
+        const cardsSnap = await getDocs(cardsColRef);
+        cardsSnap.forEach(cardDoc => {
+          const c = cardDoc.data() as Card;
+          if (c.columnId === 'testing') {
+            const updatedRemainingEffort = { ...c.remainingEffort };
+            updatedRemainingEffort.development = c.effort.development; // Reset dev effort to full
+            
+            batch.update(cardDoc.ref, {
+              columnId: 'development',
+              remainingEffort: updatedRemainingEffort,
+              history: [...(c.history || []), { day: gameState.day, columnId: 'development' }]
+            });
+            logs.push(`[Shift-Left Migration] Card "${c.title}" moved back from Testing to Development with full Development effort, keeping Testing progress.`);
+          }
+        });
+      }
+
       // Handle custom triggered scenario events selected by admin
       if (gameData.nextEventId) {
         if (gameData.nextEventId === 'wip_limits') {
+          wipLimitsActive = true;
           pairingAllowed = true;
           columnsWipConfig = columnsWipConfig.map(col => {
             if (col.id === 'analysis') return { ...col, wipLimit: 2 };
@@ -775,20 +991,197 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
               description: 'Routine maintenance window complete. No card was blocked as development queue was empty.'
             };
           }
+        } else if (gameData.nextEventId === 'tradeshow') {
+          if (smallerBatchesActive) {
+            // Spawn 3 child cards
+            const epicId = `epic_tradeshow_${generateId()}`;
+            const epic: Card = {
+              id: epicId,
+              title: 'Trade Show Demo Epic',
+              description: 'Deliver the product demo for the annual industry trade show.',
+              type: 'epic',
+              columnId: 'epic_pool',
+              effort: { analysis: 0, development: 12, testing: 6 },
+              remainingEffort: { analysis: 0, development: 12, testing: 6 },
+              assignedAvatars: [],
+              isBlocked: false,
+              failedQACount: 0,
+              createdAt: nextDay,
+              completedAt: null,
+              startedAt: null,
+              history: [{ day: nextDay, columnId: 'epic_pool' }],
+              isEpic: true,
+              epicProgress: 0,
+              childCardIds: []
+            };
+
+            const child1Id = `${epicId}_c1`;
+            const child1: Card = {
+              id: child1Id,
+              title: 'Trade Show Demo - Core Engine',
+              description: 'Foundational backend API for trade show demo.',
+              type: 'standard',
+              columnId: 'ready',
+              effort: { analysis: 1, development: 4, testing: 2 },
+              remainingEffort: { analysis: 1, development: 4, testing: 2 },
+              assignedAvatars: [],
+              isBlocked: false,
+              failedQACount: 0,
+              createdAt: nextDay,
+              completedAt: null,
+              startedAt: null,
+              history: [{ day: nextDay, columnId: 'ready' }],
+              parentEpicId: epicId
+            };
+
+            const child2Id = `${epicId}_c2`;
+            const child2: Card = {
+              id: child2Id,
+              title: 'Trade Show Demo - UI Layout',
+              description: 'Frontend visual components for trade show demo.',
+              type: 'standard',
+              columnId: 'ready',
+              effort: { analysis: 1, development: 4, testing: 2 },
+              remainingEffort: { analysis: 1, development: 4, testing: 2 },
+              assignedAvatars: [],
+              isBlocked: false,
+              failedQACount: 0,
+              createdAt: nextDay,
+              completedAt: null,
+              startedAt: null,
+              history: [{ day: nextDay, columnId: 'ready' }],
+              parentEpicId: epicId
+            };
+
+            const child3Id = `${epicId}_c3`;
+            const child3: Card = {
+              id: child3Id,
+              title: 'Trade Show Demo - Mock Payment',
+              description: 'Stripe simulated module for trade show checkout.',
+              type: 'standard',
+              columnId: 'ready',
+              effort: { analysis: 2, development: 4, testing: 2 },
+              remainingEffort: { analysis: 2, development: 4, testing: 2 },
+              assignedAvatars: [],
+              isBlocked: false,
+              failedQACount: 0,
+              createdAt: nextDay,
+              completedAt: null,
+              startedAt: null,
+              history: [{ day: nextDay, columnId: 'ready' }],
+              parentEpicId: epicId
+            };
+
+            epic.childCardIds = [child1Id, child2Id, child3Id];
+
+            batch.set(doc(db, 'games', roomCode, 'cards', epicId), epic);
+            batch.set(doc(db, 'games', roomCode, 'cards', child1Id), child1);
+            batch.set(doc(db, 'games', roomCode, 'cards', child2Id), child2);
+            batch.set(doc(db, 'games', roomCode, 'cards', child3Id), child3);
+
+            nextEvent = {
+              title: 'Trade Show Demo (Split Into Stories)',
+              description: 'The Trade Show Demo Epic has been split into 3 independent stories in the Ready column because Story Splitting / Smaller Batches is active. Complete them to progress the Epic!',
+              capacityChange: [
+                { avatarId: 'alice', description: 'Trade show prep', rollModifier: -1 },
+                { avatarId: 'bob', description: 'Trade show prep', rollModifier: -1 },
+                { avatarId: 'charlie', description: 'Trade show prep', rollModifier: -1 }
+              ]
+            };
+            logs.push(`[Event] Trade Show Demo epic split into 3 stories: Core Engine, UI Layout, Mock Payment.`);
+          } else {
+            const epicId = `epic_tradeshow_${generateId()}`;
+            const epic: Card = {
+              id: epicId,
+              title: 'Trade Show Demo Epic',
+              description: 'Deliver the product demo for the annual industry trade show. (Large monolithic scope)',
+              type: 'epic',
+              columnId: 'ready',
+              effort: { analysis: 2, development: 12, testing: 6 },
+              remainingEffort: { analysis: 2, development: 12, testing: 6 },
+              assignedAvatars: [],
+              isBlocked: false,
+              failedQACount: 0,
+              createdAt: nextDay,
+              completedAt: null,
+              startedAt: null,
+              history: [{ day: nextDay, columnId: 'ready' }],
+              isEpic: true,
+              epicProgress: 0,
+              childCardIds: []
+            };
+
+            batch.set(doc(db, 'games', roomCode, 'cards', epicId), epic);
+
+            nextEvent = {
+              title: 'Trade Show Demo (Monolithic Epic)',
+              description: 'A single, large Trade Show Demo Epic card has arrived in the Ready column. It is massive (Dev: 12, Test: 6). Try to coordinate the team to finish it by week\'s end!',
+              capacityChange: [
+                { avatarId: 'alice', description: 'Trade show prep', rollModifier: -1 },
+                { avatarId: 'bob', description: 'Trade show prep', rollModifier: -1 },
+                { avatarId: 'charlie', description: 'Trade show prep', rollModifier: -1 }
+              ]
+            };
+            logs.push(`[Event] Injected monolithic Trade Show Demo Epic card into the Ready column.`);
+          }
+        } else if (gameData.nextEventId === 'os_upgrade') {
+          nextEvent = {
+            title: 'Client OS Upgrade - Day 1',
+            description: 'Workstation upgrades active today. All developers suffer a -2 capacity modifier. Environment drift increases blocker risk to 30% for the next 3 days.',
+            capacityChange: [
+              { avatarId: 'alice', description: 'OS Upgrade', rollModifier: -2 },
+              { avatarId: 'bob', description: 'OS Upgrade', rollModifier: -2 },
+              { avatarId: 'charlie', description: 'OS Upgrade', rollModifier: -2 }
+            ]
+          };
+          logs.push(`[Event] Ingested mandatory Client OS Upgrade: developers have capacity capped and increased blocker risk.`);
         }
       }
 
-      // Commit player resets and card additions
+      // Day 2 trade show capacity modifier carry-over check
+      if (!nextEvent && (nextDay % 5 === 2) && gameData.currentDayEvent?.title.includes('Trade Show')) {
+        nextEvent = {
+          title: 'Trade Show Prep - Day 2',
+          description: 'Developers are finishing trade show prep. All capacity rolls still suffer a -1 modifier today.',
+          capacityChange: [
+            { avatarId: 'alice', description: 'Trade show prep', rollModifier: -1 },
+            { avatarId: 'bob', description: 'Trade show prep', rollModifier: -1 },
+            { avatarId: 'charlie', description: 'Trade show prep', rollModifier: -1 }
+          ]
+        };
+      }
+
+      // OS Upgrade Day 2/3 blocker risk warning
+      if (!nextEvent && ((nextDay % 5 === 2) || (nextDay % 5 === 3)) && gameData.currentDayEvent?.title.includes('Client OS Upgrade')) {
+        nextEvent = {
+          title: 'Client OS Upgrade - Environment Drift',
+          description: 'Laptops updated, but environments are unstable. Blocker risk remains at 30% today.'
+        };
+      }
+
+      // Clear card assignments (so we start fresh today)
+      const cardsSnap = await getDocs(cardsColRef);
+      cardsSnap.forEach(cardDoc => {
+        batch.update(cardDoc.ref, {
+          assignedAvatars: []
+        });
+      });
+
+      // Commit player resets and card updates
       await batch.commit();
 
       // Update main game doc
       await updateDoc(gameDocRef, {
         day: nextDay,
-        gamePhase: nextDay > 10 ? 'game_over' : 'day_start',
+        gamePhase: nextDay > (gameData.config?.maxDays ?? 10) ? 'game_over' : 'day_start',
         pairingAllowed,
         currentDayEvent: nextEvent,
         nextEventId: null, // Reset event trigger queue
-        eventLogs: logs
+        eventLogs: logs,
+        wipLimitsActive,
+        shiftLeftActive,
+        swarmingActive,
+        smallerBatchesActive
       });
 
     } catch (err) {
@@ -805,6 +1198,235 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     });
   }, [roomCode, isAdmin]);
 
+  // Fast Forward to Week's End (Admin Only)
+  const fastForwardToWeekEnd = useCallback(async () => {
+    if (!roomCode || !isAdmin) return;
+
+    const gameDocRef = doc(db, 'games', roomCode);
+    const cardsColRef = collection(db, 'games', roomCode, 'cards');
+
+    try {
+      const gameSnap = await getDoc(gameDocRef);
+      if (!gameSnap.exists()) return;
+
+      const gameData = gameSnap.data();
+      const currentDay = gameData.day;
+      
+      const currentDayInWeek = currentDay % 5 === 0 ? 5 : currentDay % 5;
+      const daysToAdvance = 5 - currentDayInWeek;
+      if (daysToAdvance <= 0) return; // Already at week end
+
+      const targetDay = currentDay + daysToAdvance;
+      const cardsSnap = await getDocs(cardsColRef);
+      const activeCards: Card[] = [];
+      cardsSnap.forEach(snap => activeCards.push(snap.data() as Card));
+
+      const completedCards = activeCards.filter(c => c.columnId === 'done');
+      const columnWIP: { [key: string]: number } = {};
+      defaultColumns.forEach(col => {
+        columnWIP[col.id] = activeCards.filter(c => c.columnId === col.id).length;
+      });
+
+      let totalCycleTime = 0;
+      let totalLeadTime = 0;
+      completedCards.forEach(c => {
+        const lead = c.completedAt !== null ? c.completedAt - c.createdAt : 0;
+        const cycle = c.completedAt !== null && c.startedAt !== null ? c.completedAt - c.startedAt : lead;
+        totalLeadTime += lead;
+        totalCycleTime += cycle;
+      });
+
+      const averageCycleTime = completedCards.length > 0 ? parseFloat((totalCycleTime / completedCards.length).toFixed(1)) : null;
+      const averageLeadTime = completedCards.length > 0 ? parseFloat((totalLeadTime / completedCards.length).toFixed(1)) : null;
+
+      const mockLogs: DailyLog[] = [];
+      let lastCumulative = gameData.dailyLogs.length > 0 ? gameData.dailyLogs[gameData.dailyLogs.length - 1].cumulativeThroughput : 0;
+
+      for (let d = currentDay; d <= targetDay; d++) {
+        mockLogs.push({
+          day: d,
+          columnWIP,
+          throughput: 0,
+          cumulativeThroughput: lastCumulative,
+          averageCycleTime,
+          averageLeadTime,
+          wipLimitsActive: gameData.wipLimitsActive,
+          shiftLeftActive: gameData.shiftLeftActive,
+          swarmingActive: gameData.swarmingActive,
+          smallerBatchesActive: gameData.smallerBatchesActive,
+        });
+      }
+
+      const logs = [...gameData.eventLogs, `--- Fast Forwarded from Day ${currentDay} to Day ${targetDay} (Week's End) ---`];
+      
+      await updateDoc(gameDocRef, {
+        day: targetDay,
+        dailyLogs: [...(gameData.dailyLogs || []), ...mockLogs],
+        gamePhase: 'week_summary',
+        eventLogs: logs
+      });
+    } catch (err) {
+      console.error("Fast forward failed:", err);
+    }
+  }, [roomCode, isAdmin]);
+
+  // Inject custom expedite cards (Admin Only)
+  const injectCustomExpediteCards = useCallback(async (titlePrefix: string, count: number) => {
+    if (!roomCode || !isAdmin) return;
+
+    const gameDocRef = doc(db, 'games', roomCode);
+    const batch = writeBatch(db);
+
+    try {
+      const gameSnap = await getDoc(gameDocRef);
+      if (!gameSnap.exists()) return;
+      const gameData = gameSnap.data();
+
+      const logs = [...gameData.eventLogs, `[Alert] Injecting ${count} EXPEDITE cards: "${titlePrefix}"` + ` - Emergency work added by instructor.`];
+      
+      for (let i = 0; i < count; i++) {
+        const id = `card_custom_expedite_${generateId()}_${i}`;
+        const newCard: Card = {
+          id,
+          title: count > 1 ? `${titlePrefix} (Part ${i + 1}/${count})` : titlePrefix,
+          description: `Emergency work injected by instructor. Critical response required immediately.`,
+          type: 'expedite',
+          columnId: 'ready',
+          effort: { analysis: 0, development: 2, testing: 1 },
+          remainingEffort: { analysis: 0, development: 2, testing: 1 },
+          assignedAvatars: [],
+          isBlocked: false,
+          failedQACount: 0,
+          createdAt: gameData.day,
+          completedAt: null,
+          startedAt: null,
+          history: [{ day: gameData.day, columnId: 'ready' }]
+        };
+        batch.set(doc(db, 'games', roomCode, 'cards', id), newCard);
+      }
+
+      // Automatically block 50% of active Development cards
+      const cardsColRef = collection(db, 'games', roomCode, 'cards');
+      const cardsSnap = await getDocs(cardsColRef);
+      const devCards: Card[] = [];
+      cardsSnap.forEach(snap => {
+        const c = snap.data() as Card;
+        if (c.columnId === 'development' && !c.isBlocked) {
+          devCards.push(c);
+        }
+      });
+
+      if (devCards.length > 0) {
+        const countToBlock = Math.ceil(devCards.length / 2);
+        for (let i = 0; i < countToBlock; i++) {
+          const card = devCards[i];
+          batch.update(doc(db, 'games', roomCode, 'cards', card.id), {
+            isBlocked: true,
+            blockerReason: 'Blocked due to system emergency response.'
+          });
+          logs.push(`[Blocker] Card "${card.title}" has been BLOCKED to free up capacity for emergency response.`);
+        }
+      }
+
+      batch.update(gameDocRef, { eventLogs: logs });
+      await batch.commit();
+    } catch (err) {
+      console.error("Failed to inject custom expedite cards:", err);
+    }
+  }, [roomCode, isAdmin]);
+
+  // Split Epic Card (Any User or Admin)
+  const splitEpic = useCallback(async (epicId: string) => {
+    if (!roomCode) return;
+    
+    const epicRef = doc(db, 'games', roomCode, 'cards', epicId);
+    const gameRef = doc(db, 'games', roomCode);
+
+    try {
+      const epicSnap = await getDoc(epicRef);
+      if (!epicSnap.exists()) return;
+      const epic = epicSnap.data() as Card;
+
+      const child1: Card = {
+        id: `card_${generateId()}_c1`,
+        title: `${epic.title} - Core Engine`,
+        description: `Implement foundational backend core for: ${epic.title}`,
+        type: 'standard',
+        columnId: 'ready',
+        effort: { analysis: 1, development: 4, testing: 2 },
+        remainingEffort: { analysis: 1, development: 4, testing: 2 },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: gameState.day,
+        completedAt: null,
+        startedAt: null,
+        history: [{ day: gameState.day, columnId: 'ready' }],
+        parentEpicId: epic.id
+      };
+
+      const child2: Card = {
+        id: `card_${generateId()}_c2`,
+        title: `${epic.title} - UI Layout`,
+        description: `Design and code user screens and layouts for: ${epic.title}`,
+        type: 'standard',
+        columnId: 'ready',
+        effort: { analysis: 1, development: 4, testing: 2 },
+        remainingEffort: { analysis: 1, development: 4, testing: 2 },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: gameState.day,
+        completedAt: null,
+        startedAt: null,
+        history: [{ day: gameState.day, columnId: 'ready' }],
+        parentEpicId: epic.id
+      };
+
+      const child3: Card = {
+        id: `card_${generateId()}_c3`,
+        title: `${epic.title} - Mock Payment`,
+        description: `Add payment processing integration for: ${epic.title}`,
+        type: 'standard',
+        columnId: 'ready',
+        effort: { analysis: 2, development: 4, testing: 2 },
+        remainingEffort: { analysis: 2, development: 4, testing: 2 },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: gameState.day,
+        completedAt: null,
+        startedAt: null,
+        history: [{ day: gameState.day, columnId: 'ready' }],
+        parentEpicId: epic.id
+      };
+
+      const batch = writeBatch(db);
+
+      batch.update(epicRef, {
+        columnId: 'epic_pool',
+        isEpic: true,
+        type: 'epic',
+        epicProgress: 0,
+        childCardIds: [child1.id, child2.id, child3.id]
+      });
+
+      batch.set(doc(db, 'games', roomCode, 'cards', child1.id), child1);
+      batch.set(doc(db, 'games', roomCode, 'cards', child2.id), child2);
+      batch.set(doc(db, 'games', roomCode, 'cards', child3.id), child3);
+
+      const gameSnap = await getDoc(gameRef);
+      if (gameSnap.exists()) {
+        const logs = [...gameSnap.data().eventLogs, `[Split] Epic "${epic.title}" split into 3 independent child stories.`];
+        batch.update(gameRef, { eventLogs: logs });
+      }
+
+      await batch.commit();
+    } catch (err) {
+      console.error("Failed to split epic:", err);
+    }
+  }, [roomCode, gameState.day]);
+
   return {
     gameState,
     loading,
@@ -816,6 +1438,9 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     replenishBacklog,
     endDay,
     startNextDay,
-    queueEvent
+    queueEvent,
+    fastForwardToWeekEnd,
+    injectCustomExpediteCards,
+    splitEpic
   };
 };

@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { GameState, Card, DailyLog, ScenarioDayEvent, CardStageEffort } from './types';
+import type { GameState, Card, DailyLog, ScenarioDayEvent } from './types';
 import { easyModeScenario, defaultColumns, defaultAvatars } from './scenarios';
 
 const LOCAL_STORAGE_KEY = 'antigravity_kanban_game_state';
@@ -24,6 +24,34 @@ const BACKLOG_CARD_POOL = [
   { title: 'Localize Platform in Spanish', description: 'Translate UI copy and error strings for global outreach.' },
   { title: 'Fix CSS Grid Layout on Safari', description: 'Resolve flexbox wrap visual bugs on iOS devices.' }
 ];
+
+const rollupEpicProgress = (cards: Card[], day: number): Card[] => {
+  let updatedCards = [...cards];
+  const epics = updatedCards.filter(c => c.isEpic || c.type === 'epic');
+  epics.forEach(epic => {
+    const children = updatedCards.filter(c => c.parentEpicId === epic.id);
+    if (children.length > 0) {
+      const completed = children.filter(c => c.columnId === 'done').length;
+      const progress = Math.round((completed / children.length) * 100);
+      
+      if (progress !== (epic.epicProgress || 0)) {
+        updatedCards = updatedCards.map(c => {
+          if (c.id === epic.id) {
+            const updates: Partial<Card> = { epicProgress: progress };
+            if (progress === 100 && c.columnId !== 'done') {
+              updates.columnId = 'done';
+              updates.completedAt = day;
+              updates.history = [...(c.history || []), { day, columnId: 'done' }];
+            }
+            return { ...c, ...updates };
+          }
+          return c;
+        });
+      }
+    }
+  });
+  return updatedCards;
+};
 
 export const useGameState = () => {
   const [gameState, setGameState] = useState<GameState>(() => {
@@ -54,6 +82,18 @@ export const useGameState = () => {
       rolledToday: false,
       currentDayEvent: null,
       eventLogs: ['Game initialized. Click Start to begin your Kanban journey!'],
+      wipLimitsActive: false,
+      shiftLeftActive: false,
+      swarmingActive: false,
+      smallerBatchesActive: false,
+      config: {
+        maxDays: 10,
+        blockerChance: 0.15,
+        qaFailChanceUnpaired: 0.20,
+        qaFailChancePaired: 0.02,
+        unblockCost: 2,
+        pairingHelpCost: 2
+      }
     };
   });
 
@@ -116,6 +156,18 @@ export const useGameState = () => {
       rolledToday: false,
       currentDayEvent: initialEvent,
       eventLogs: welcomeLog,
+      wipLimitsActive: false,
+      shiftLeftActive: false,
+      swarmingActive: false,
+      smallerBatchesActive: false,
+      config: {
+        maxDays: 10,
+        blockerChance: 0.15,
+        qaFailChanceUnpaired: 0.20,
+        qaFailChancePaired: 0.02,
+        unblockCost: 2,
+        pairingHelpCost: 2
+      }
     });
   }, []);
 
@@ -209,7 +261,7 @@ export const useGameState = () => {
   }, [gameState.snapshotAtDayStart, gameState.gamePhase]);
 
   // Allocate capacity to card (Real-Time Model 1)
-  const allocateCapacity = useCallback((avatarId: string, cardId: string) => {
+  const allocateCapacity = useCallback((avatarId: string, cardId: string, effortType?: 'analysis' | 'development' | 'testing') => {
     setGameState(prev => {
       const logs = [...prev.eventLogs];
       const avatar = prev.avatars.find(a => a.id === avatarId);
@@ -221,6 +273,19 @@ export const useGameState = () => {
         return prev;
       }
 
+      // 1. Expedite Urgency Constraint
+      if (card.type !== 'epic' && card.type !== 'expedite') {
+        const hasExpediteInColumn = prev.cards.some(
+          c => c.columnId === card.columnId && 
+               c.type === 'expedite' && 
+               ((c.remainingEffort.analysis || 0) > 0 || (c.remainingEffort.development || 0) > 0 || (c.remainingEffort.testing || 0) > 0)
+        );
+        if (hasExpediteInColumn) {
+          logs.push(`[Blocked] Cannot work on standard card "${card.title}" while an EXPEDITE card is active in the ${card.columnId.toUpperCase()} column.`);
+          return { ...prev, eventLogs: logs };
+        }
+      }
+
       // Check context switching penalty
       // Penalty triggers if they worked on a DIFFERENT card today
       const workedOnOthers = avatar.workedOnCardIdsToday.filter(id => id !== cardId);
@@ -228,7 +293,10 @@ export const useGameState = () => {
       // Also triggers if they switch from yesterday's last card
       const hasSwitchFromYesterday = avatar.workedOnCardIdsToday.length === 0 && avatar.previousCardId !== null && avatar.previousCardId !== cardId;
       const isSwitch = hasSwitchToday || hasSwitchFromYesterday;
-      const penalty = isSwitch ? 1 : 0;
+      let penalty = isSwitch ? 1 : 0;
+      if (prev.swarmingActive) {
+        penalty = 0;
+      }
 
       const availableCapacity = avatar.remainingCapacity - penalty;
       if (availableCapacity <= 0) {
@@ -236,15 +304,17 @@ export const useGameState = () => {
         return prev;
       }
 
+      const configUnblockCost = prev.config?.unblockCost ?? 2;
+      const configPairingCost = prev.config?.pairingHelpCost ?? 2;
+
       // Handle Blocker check
       if (card.isBlocked) {
-        // Unblocking takes 2 capacity points
-        if (availableCapacity < 2) {
-          logs.push(`[Warning] Unblocking "${card.title}" requires 2 capacity points. ${avatar.name} has only ${availableCapacity} available.`);
+        if (availableCapacity < configUnblockCost) {
+          logs.push(`[Warning] Unblocking "${card.title}" requires ${configUnblockCost} capacity points. ${avatar.name} has only ${availableCapacity} available.`);
           return prev;
         }
 
-        const capacityToSpend = 2;
+        const capacityToSpend = configUnblockCost;
         const totalCost = capacityToSpend + penalty;
 
         // Perform unblock roll (4+ on d6). If paired, roll with advantage.
@@ -254,7 +324,7 @@ export const useGameState = () => {
         const roll2 = isPairedUnblock ? Math.floor(Math.random() * 6) + 1 : 0;
         const maxRoll = Math.max(roll1, roll2);
 
-        logs.push(`${avatar.name} spent 2 capacity trying to unblock "${card.title}"${isSwitch ? ' (including -1 task switch penalty)' : ''}.`);
+        logs.push(`${avatar.name} spent ${configUnblockCost} capacity trying to unblock "${card.title}"${isSwitch && penalty > 0 ? ' (including -1 task switch penalty)' : ''}.`);
         logs.push(`Unblock roll: ${roll1}${isPairedUnblock ? ` (with helper roll: ${roll2})` : ''} -> Result: ${maxRoll}`);
 
         let isBlocked: boolean = card.isBlocked;
@@ -303,29 +373,35 @@ export const useGameState = () => {
 
       // Normal Effort progress
       const currentColumn = prev.columns.find(col => col.id === card.columnId);
-      const allowedEfforts = currentColumn ? currentColumn.allowedEffortTypes : [];
+      if (!currentColumn) return prev;
+
+      const allowedEfforts = prev.shiftLeftActive && card.columnId === 'development'
+        ? ['development', 'testing']
+        : currentColumn.allowedEffortTypes;
       
       // Find what effort type and points are needed
-      let activeEffortType: keyof CardStageEffort | null = null;
-      let neededProgress = 0;
-
-      for (const type of allowedEfforts) {
-        if (card.remainingEffort[type] > 0) {
-          activeEffortType = type;
-          neededProgress = card.remainingEffort[type];
-          break;
-        }
+      let activeEffortType = effortType;
+      if (!activeEffortType) {
+        activeEffortType = allowedEfforts.find(
+          type => (card.remainingEffort[type] || 0) > 0
+        ) as 'analysis' | 'development' | 'testing';
       }
 
-      if (!activeEffortType || neededProgress === 0) {
+      if (!activeEffortType || !allowedEfforts.includes(activeEffortType)) {
         logs.push(`[Warning] No active effort required for "${card.title}" in this stage.`);
+        return prev;
+      }
+
+      const neededProgress = card.remainingEffort[activeEffortType] || 0;
+      if (neededProgress === 0) {
+        logs.push(`[Warning] No remaining ${activeEffortType} effort for "${card.title}".`);
         return prev;
       }
 
       // Check if paired (is helper)
       // If someone else already assigned, this developer is the helper
       const isHelper = card.assignedAvatars.length > 0 && !card.assignedAvatars.includes(avatarId);
-      if (isHelper && !prev.pairingAllowed) {
+      if (isHelper && !(prev.pairingAllowed || prev.wipLimitsActive)) {
         logs.push(`[Warning] Pairing is disabled. Cannot assign ${avatar.name} as a helper.`);
         return prev;
       }
@@ -335,13 +411,13 @@ export const useGameState = () => {
 
       if (isHelper) {
         // Helper gets 50% progress.
-        // To get P progress points, they must spend P * 2 capacity.
-        const maxProgressPossible = Math.floor(availableCapacity / 2);
+        // To get P progress points, they must spend P * configPairingCost capacity.
+        const maxProgressPossible = Math.floor(availableCapacity / configPairingCost);
         progressToApply = Math.min(neededProgress, maxProgressPossible);
-        capacityToSpend = progressToApply * 2;
+        capacityToSpend = progressToApply * configPairingCost;
 
         if (capacityToSpend === 0 && availableCapacity > 0) {
-          logs.push(`[Warning] Helper requires at least 2 capacity points to make 1 progress point. ${avatar.name} has only ${availableCapacity} available.`);
+          logs.push(`[Warning] Helper requires at least ${configPairingCost} capacity points to make 1 progress point. ${avatar.name} has only ${availableCapacity} available.`);
           return prev;
         }
       } else {
@@ -351,7 +427,7 @@ export const useGameState = () => {
       }
 
       const totalCost = capacityToSpend + penalty;
-      logs.push(`${avatar.name} applied ${capacityToSpend} capacity points -> generated ${progressToApply} progress on "${card.title}"${isSwitch ? ' (including -1 task switch penalty)' : ''}${isHelper ? ' [Pair Helper 50% rate]' : ' [Lead Dev]'}.`);
+      logs.push(`${avatar.name} applied ${capacityToSpend} capacity points -> generated ${progressToApply} progress of type ${activeEffortType} on "${card.title}"${isSwitch && penalty > 0 ? ' (including -1 task switch penalty)' : ''}${isHelper ? ` [Pair Helper at ${configPairingCost}:1 rate]` : ' [Lead Dev]'}.`);
 
       const updatedCards = prev.cards.map(c => {
         if (c.id === cardId) {
@@ -475,19 +551,24 @@ export const useGameState = () => {
       
       let updatedCards = [...prev.cards];
 
+      const blockerChance = prev.config?.blockerChance ?? 0.15;
+      const isOSUpgradeActive = prev.currentDayEvent?.title.includes('OS Upgrade');
+      // If OS upgrade is active and it's within the first 3 days of the week, blocker risk increases to 30%
+      const currentDayInWeek = (prev.day % 5) === 0 ? 5 : (prev.day % 5);
+      const finalBlockerChance = (isOSUpgradeActive && currentDayInWeek <= 3) ? 0.30 : blockerChance;
+
       // 1. Blocker checks for active cards that had work applied today
       updatedCards = updatedCards.map(card => {
         const workedOnToday = card.assignedAvatars.length > 0;
-        const isWorking = card.columnId !== 'backlog' && card.columnId !== 'ready' && card.columnId !== 'done';
+        const isWorking = card.columnId !== 'backlog' && card.columnId !== 'ready' && card.columnId !== 'done' && card.columnId !== 'epic_pool';
         
         if (workedOnToday && isWorking && !card.isBlocked) {
           const isPaired = card.assignedAvatars.length > 1;
           const roll1 = Math.random();
           const roll2 = isPaired ? Math.random() : 1; // 1 means safe
           
-          const blockerThreshold = 0.15;
-          const blocked1 = roll1 < blockerThreshold;
-          const blocked2 = roll2 < blockerThreshold;
+          const blocked1 = roll1 < finalBlockerChance;
+          const blocked2 = roll2 < finalBlockerChance;
 
           if (blocked1 && blocked2) {
             logs.push(`[Blocker] Oh no! "${card.title}" got blocked by a quality bug.`);
@@ -503,35 +584,42 @@ export const useGameState = () => {
         return card;
       });
 
-      // 2. QA Rework checks for Testing cards that finished testing today
-      updatedCards = updatedCards.map(card => {
-        // Rework triggers if the testing effort is complete, it had work applied today, and isn't blocked
-        const workedOnToday = card.assignedAvatars.length > 0;
-        const isTestingDone = card.columnId === 'testing' && card.remainingEffort.testing === 0;
+      // 2. QA Rework checks for Testing cards that finished testing today (Bypassed if Shift-Left is active)
+      if (!prev.shiftLeftActive) {
+        updatedCards = updatedCards.map(card => {
+          // Rework triggers if the testing effort is complete, it had work applied today, and isn't blocked
+          const workedOnToday = card.assignedAvatars.length > 0;
+          const isTestingDone = card.columnId === 'testing' && card.remainingEffort.testing === 0;
 
-        if (isTestingDone && workedOnToday && !card.isBlocked) {
-          const isPaired = card.assignedAvatars.length > 1;
-          const qaFailChance = isPaired ? 0.02 : 0.20;
-          
-          if (Math.random() < qaFailChance) {
-            logs.push(`[QA Failure] "${card.title}" failed QA validation. Sent back to Development for rework.`);
-            return {
-              ...card,
-              columnId: 'development',
-              remainingEffort: {
-                ...card.remainingEffort,
-                development: 2, // rework effort
-                testing: 1,     // retest effort
-              },
-              failedQACount: card.failedQACount + 1,
-              // Reset assignments so they don't carry over
-              assignedAvatars: [],
-              history: [...card.history, { day: prev.day, columnId: 'development' }],
-            };
+          if (isTestingDone && workedOnToday && !card.isBlocked) {
+            const isPaired = card.assignedAvatars.length > 1;
+            const qaFailChanceUnpaired = prev.config?.qaFailChanceUnpaired ?? 0.20;
+            const qaFailChancePaired = prev.config?.qaFailChancePaired ?? 0.02;
+            const qaFailChance = isPaired ? qaFailChancePaired : qaFailChanceUnpaired;
+            
+            if (Math.random() < qaFailChance) {
+              logs.push(`[QA Failure] "${card.title}" failed QA validation. Sent back to Development for rework.`);
+              return {
+                ...card,
+                columnId: 'development',
+                remainingEffort: {
+                  ...card.remainingEffort,
+                  development: card.effort.development || 2, // rework effort
+                  testing: card.effort.testing || 1,     // retest effort
+                },
+                failedQACount: card.failedQACount + 1,
+                // Reset assignments so they don't carry over
+                assignedAvatars: [],
+                history: [...card.history, { day: prev.day, columnId: 'development' }],
+              };
+            }
           }
-        }
-        return card;
-      });
+          return card;
+        });
+      }
+
+      // Roll up parent epic progress if any child cards are done
+      updatedCards = rollupEpicProgress(updatedCards, prev.day);
 
       // 3. Clear avatar daily assignments for next day, set previousCardId
       const updatedAvatars = prev.avatars.map(avatar => {
@@ -580,17 +668,26 @@ export const useGameState = () => {
         cumulativeThroughput,
         averageLeadTime: avgLead,
         averageCycleTime: avgCycle,
+        wipLimitsActive: prev.wipLimitsActive,
+        shiftLeftActive: prev.shiftLeftActive,
+        swarmingActive: prev.swarmingActive,
+        smallerBatchesActive: prev.smallerBatchesActive,
       };
 
       const updatedLogs = [...prev.dailyLogs, dayLog];
 
-      // 5. Check Game Over
+      // 5. Check Game Over or Weekend Summary
       const isGameOver = nextDay > prev.maxDays;
-      const gamePhase = isGameOver ? 'game_over' : 'day_summary';
+      const isWeekend = prev.day % 5 === 0;
+      const gamePhase = isGameOver ? 'game_over' : (isWeekend ? 'week_summary' : 'day_summary');
 
       if (isGameOver) {
         logs.push(`--- Game Over! ---`);
         logs.push(`Completed ${cumulativeThroughput} items. Average Lead Time: ${avgLead || 0} days. Average Cycle Time: ${avgCycle || 0} days.`);
+      } else if (isWeekend) {
+        logs.push(`--- Week End Reached (Day ${prev.day}) ---`);
+        logs.push(`Week performance: ${completedCount} cards completed. Cumulative: ${cumulativeThroughput}.`);
+        logs.push(`Waiting for instructor to configure next week's parameters.`);
       } else {
         logs.push(`--- Day ${prev.day} Summary ---`);
         logs.push(`Throughput: ${completedCount} cards completed. Cumulative: ${cumulativeThroughput}.`);
@@ -609,73 +706,303 @@ export const useGameState = () => {
   }, []);
 
   // Advance to next day after viewing summary
-  const startNextDay = useCallback(() => {
+  const startNextDay = useCallback((accelerators?: {
+    wipLimitsActive?: boolean;
+    shiftLeftActive?: boolean;
+    swarmingActive?: boolean;
+    smallerBatchesActive?: boolean;
+  }) => {
     setGameState(prev => {
       const nextDay = prev.day + 1;
       const scenario = easyModeScenario;
-      const dayEvent: ScenarioDayEvent | null = scenario.events[nextDay] || null;
+      let dayEvent: ScenarioDayEvent | null = scenario.events[nextDay] || null;
       
       const logs = [...prev.eventLogs, `--- Start Day ${nextDay} ---`];
 
+      let wipLimitsActive = prev.wipLimitsActive || false;
+      let shiftLeftActive = prev.shiftLeftActive || false;
+      let swarmingActive = prev.swarmingActive || false;
+      let smallerBatchesActive = prev.smallerBatchesActive || false;
+
+      if (accelerators) {
+        wipLimitsActive = !!accelerators.wipLimitsActive;
+        shiftLeftActive = !!accelerators.shiftLeftActive;
+        swarmingActive = !!accelerators.swarmingActive;
+        smallerBatchesActive = !!accelerators.smallerBatchesActive;
+      }
+
       let updatedCards = [...prev.cards];
       let updatedColumns = [...prev.columns];
-      let pairingAllowed = prev.pairingAllowed;
+      let pairingAllowed = prev.pairingAllowed || false;
 
-      if (dayEvent) {
-        logs.push(`Event: ${dayEvent.title}`);
-        logs.push(dayEvent.description);
+      // Shift-Left column migration check
+      if (shiftLeftActive && !prev.shiftLeftActive) {
+        updatedCards = updatedCards.map(c => {
+          if (c.columnId === 'testing') {
+            const updatedRemainingEffort = { ...c.remainingEffort };
+            updatedRemainingEffort.development = c.effort.development; // Reset dev effort to full
+            logs.push(`[Shift-Left Migration] Card "${c.title}" moved back from Testing to Development with full Development effort, keeping Testing progress.`);
+            return {
+              ...c,
+              columnId: 'development',
+              remainingEffort: updatedRemainingEffort,
+              history: [...(c.history || []), { day: prev.day, columnId: 'development' }]
+            };
+          }
+          return c;
+        });
+      }
 
-        if (dayEvent.pairingAllowed !== undefined) {
-          pairingAllowed = dayEvent.pairingAllowed;
+      // Enforce WIP limits accelerator
+      if (wipLimitsActive) {
+        pairingAllowed = true;
+        updatedColumns = updatedColumns.map(col => {
+          if (col.id === 'analysis') return { ...col, wipLimit: 2 };
+          if (col.id === 'development') return { ...col, wipLimit: 2 };
+          if (col.id === 'testing') return { ...col, wipLimit: 1 };
+          return col;
+        });
+      } else {
+        // Reset WIP limits if accelerator is turned off
+        updatedColumns = updatedColumns.map(col => ({ ...col, wipLimit: null }));
+      }
+
+      // Handle OS upgrade/Tradeshow events and carry-overs
+      let nextEvent = dayEvent;
+      if (nextEvent) {
+        if (nextEvent.title.includes('OS Upgrade')) {
+          // Keep OS Upgrade as is
         }
+      }
 
-        // Apply WIP limits
-        if (dayEvent.wipLimits) {
-          updatedColumns = prev.columns.map(col => {
-            if (dayEvent.wipLimits && col.id in dayEvent.wipLimits) {
-              return { ...col, wipLimit: dayEvent.wipLimits[col.id] };
+      // Inject Tradeshow epic or split child stories based on smallerBatchesActive 
+      // Wait, in multiplayer it triggers when nextEventId === 'tradeshow'. In single player we can check if dayEvent exists and is tradeshow, or if day is 6 and tradeshow is selected.
+      // Wait! Let's check when tradeshow event is queued in multiplayer.
+      // In useMultiplayerState, it's queued by nextEventId === 'tradeshow'.
+      // If we want to simulate the Tradeshow Deadline business scenario, we will implement custom injector functions or trigger it at weekend.
+      // Let's check how scenarios are selected and run. We can trigger business scenarios in startNextDay using nextEventId as well!
+      // Let's add nextEventId to types.ts and to useGameState.ts state!
+      
+      let nextEventId = prev.nextEventId;
+
+      if (nextEventId === 'wip_limits') {
+        wipLimitsActive = true;
+        pairingAllowed = true;
+        updatedColumns = updatedColumns.map(col => {
+          if (col.id === 'analysis') return { ...col, wipLimit: 2 };
+          if (col.id === 'development') return { ...col, wipLimit: 2 };
+          if (col.id === 'testing') return { ...col, wipLimit: 1 };
+          return col;
+        });
+        nextEvent = {
+          title: 'WIP Limits & Pairing Enabled!',
+          description: 'The team adopts Kanban WIP limits: Analysis (2), Development (2), Testing (1). Pairing is now enabled! Collaborating developers roll with advantage to ignore blocker checks.'
+        };
+        logs.push(`[System] Instructor enforced Kanban WIP limits & enabled Developer Pairing.`);
+      } else if (nextEventId === 'outage') {
+        const hotfixId = `card_hotfix_${Math.random().toString(36).substring(2, 9)}`;
+        const hotfix: Card = {
+          id: hotfixId,
+          title: 'Production Outage: Payment Gateway',
+          description: 'Major API failure preventing user checkouts. FIX IMMEDIATELY.',
+          type: 'expedite',
+          columnId: 'ready',
+          effort: { analysis: 0, development: 2, testing: 1 },
+          remainingEffort: { analysis: 0, development: 2, testing: 1 },
+          assignedAvatars: [],
+          isBlocked: false,
+          failedQACount: 0,
+          createdAt: nextDay,
+          completedAt: null,
+          startedAt: null,
+          history: [{ day: nextDay, columnId: 'ready' }]
+        };
+        updatedCards = [...updatedCards, hotfix];
+        nextEvent = {
+          title: 'Critical Outage: Payment Failure',
+          description: 'An urgent Production Hotfix card has arrived in the Ready column. It is marked EXPEDITE and is allowed to bypass WIP limits. Get all hands on deck!'
+        };
+        logs.push(`[Alert] PRODUCTION OUTAGE! Expedite hotfix card added to the Ready column.`);
+      } else if (nextEventId === 'tech_debt') {
+        nextEvent = {
+          title: 'Technical Debt Instability',
+          description: 'System degradation has occurred. Developers must deal with legacy issues. Capacity rolls are capped at 4 today.'
+        };
+        logs.push(`[Alert] Technical debt penalty active today.`);
+      } else if (nextEventId === 'blocker') {
+        const devCards = updatedCards.filter(c => c.columnId === 'development' && !c.isBlocked);
+        if (devCards.length > 0) {
+          const randCard = devCards[Math.floor(Math.random() * devCards.length)];
+          updatedCards = updatedCards.map(c => {
+            if (c.id === randCard.id) {
+              return { ...c, isBlocked: true, blockerReason: 'External dependency offline.' };
             }
-            return col;
+            return c;
           });
+          nextEvent = {
+            title: 'Infrastructure Blocker',
+            description: `Card "${randCard.title}" has been blocked due to server crash. Developers must spend 2 points of capacity to unblock it.`
+          };
+          logs.push(`[System] Card "${randCard.title}" has been BLOCKED.`);
+        } else {
+          nextEvent = {
+            title: 'Infrastructure Maintenance',
+            description: 'Routine maintenance window complete. No card was blocked as development queue was empty.'
+          };
         }
-
-        // Apply new cards
-        if (dayEvent.newCards) {
-          const newCardsList: Card[] = dayEvent.newCards.map((c, index) => ({
-            ...c,
-            id: `card_${generateId()}_${index}`,
-            remainingEffort: { ...c.effort },
+      } else if (nextEventId === 'tradeshow') {
+        const epicId = `epic_tradeshow_${Math.random().toString(36).substring(2, 9)}`;
+        if (smallerBatchesActive) {
+          const epic: Card = {
+            id: epicId,
+            title: 'Trade Show Demo Epic',
+            description: 'Deliver the product demo for the annual industry trade show.',
+            type: 'epic',
+            columnId: 'epic_pool',
+            effort: { analysis: 0, development: 12, testing: 6 },
+            remainingEffort: { analysis: 0, development: 12, testing: 6 },
             assignedAvatars: [],
             isBlocked: false,
             failedQACount: 0,
             createdAt: nextDay,
             completedAt: null,
-            startedAt: c.columnId !== 'backlog' && c.columnId !== 'ready' ? nextDay : null,
-            history: [{ day: nextDay, columnId: c.columnId }],
-          }));
-          updatedCards = [...updatedCards, ...newCardsList];
+            startedAt: null,
+            history: [{ day: nextDay, columnId: 'epic_pool' }],
+            isEpic: true,
+            epicProgress: 0,
+            childCardIds: [`${epicId}_c1`, `${epicId}_c2`, `${epicId}_c3`]
+          };
+          const child1: Card = {
+            id: `${epicId}_c1`,
+            title: 'Trade Show Demo - Core Engine',
+            description: 'Foundational backend API for trade show demo.',
+            type: 'standard',
+            columnId: 'ready',
+            effort: { analysis: 1, development: 4, testing: 2 },
+            remainingEffort: { analysis: 1, development: 4, testing: 2 },
+            assignedAvatars: [],
+            isBlocked: false,
+            failedQACount: 0,
+            createdAt: nextDay,
+            completedAt: null,
+            startedAt: null,
+            history: [{ day: nextDay, columnId: 'ready' }],
+            parentEpicId: epicId
+          };
+          const child2: Card = {
+            id: `${epicId}_c2`,
+            title: 'Trade Show Demo - UI Layout',
+            description: 'Frontend visual components for trade show demo.',
+            type: 'standard',
+            columnId: 'ready',
+            effort: { analysis: 1, development: 4, testing: 2 },
+            remainingEffort: { analysis: 1, development: 4, testing: 2 },
+            assignedAvatars: [],
+            isBlocked: false,
+            failedQACount: 0,
+            createdAt: nextDay,
+            completedAt: null,
+            startedAt: null,
+            history: [{ day: nextDay, columnId: 'ready' }],
+            parentEpicId: epicId
+          };
+          const child3: Card = {
+            id: `${epicId}_c3`,
+            title: 'Trade Show Demo - Mock Payment',
+            description: 'Stripe simulated module for trade show checkout.',
+            type: 'standard',
+            columnId: 'ready',
+            effort: { analysis: 2, development: 4, testing: 2 },
+            remainingEffort: { analysis: 2, development: 4, testing: 2 },
+            assignedAvatars: [],
+            isBlocked: false,
+            failedQACount: 0,
+            createdAt: nextDay,
+            completedAt: null,
+            startedAt: null,
+            history: [{ day: nextDay, columnId: 'ready' }],
+            parentEpicId: epicId
+          };
+          updatedCards = [...updatedCards, epic, child1, child2, child3];
+          nextEvent = {
+            title: 'Trade Show Demo (Split Into Stories)',
+            description: 'The Trade Show Demo Epic has been split into 3 independent stories in the Ready column because Story Splitting / Smaller Batches is active. Complete them to progress the Epic!',
+            capacityChange: [
+              { avatarId: 'alice', description: 'Trade show prep', rollModifier: -1 },
+              { avatarId: 'bob', description: 'Trade show prep', rollModifier: -1 },
+              { avatarId: 'charlie', description: 'Trade show prep', rollModifier: -1 }
+            ]
+          };
+          logs.push(`[Event] Trade Show Demo epic split into 3 stories: Core Engine, UI Layout, Mock Payment.`);
+        } else {
+          const epic: Card = {
+            id: epicId,
+            title: 'Trade Show Demo Epic',
+            description: 'Deliver the product demo for the annual industry trade show. (Large monolithic scope)',
+            type: 'epic',
+            columnId: 'ready',
+            effort: { analysis: 2, development: 12, testing: 6 },
+            remainingEffort: { analysis: 2, development: 12, testing: 6 },
+            assignedAvatars: [],
+            isBlocked: false,
+            failedQACount: 0,
+            createdAt: nextDay,
+            completedAt: null,
+            startedAt: null,
+            history: [{ day: nextDay, columnId: 'ready' }],
+            isEpic: true,
+            epicProgress: 0,
+            childCardIds: []
+          };
+          updatedCards = [...updatedCards, epic];
+          nextEvent = {
+            title: 'Trade Show Demo (Monolithic Epic)',
+            description: 'A single, large Trade Show Demo Epic card has arrived in the Ready column. It is massive (Dev: 12, Test: 6). Try to coordinate the team to finish it by week\'s end!',
+            capacityChange: [
+              { avatarId: 'alice', description: 'Trade show prep', rollModifier: -1 },
+              { avatarId: 'bob', description: 'Trade show prep', rollModifier: -1 },
+              { avatarId: 'charlie', description: 'Trade show prep', rollModifier: -1 }
+            ]
+          };
+          logs.push(`[Event] Injected monolithic Trade Show Demo Epic card into the Ready column.`);
         }
+      } else if (nextEventId === 'os_upgrade') {
+        nextEvent = {
+          title: 'Client OS Upgrade - Day 1',
+          description: 'Workstation upgrades active today. All developers suffer a -2 capacity modifier. Environment drift increases blocker risk to 30% for the next 3 days.',
+          capacityChange: [
+            { avatarId: 'alice', description: 'OS Upgrade', rollModifier: -2 },
+            { avatarId: 'bob', description: 'OS Upgrade', rollModifier: -2 },
+            { avatarId: 'charlie', description: 'OS Upgrade', rollModifier: -2 }
+          ]
+        };
+        logs.push(`[Event] Ingested mandatory Client OS Upgrade: developers have capacity capped and blocker risk increased.`);
+      }
 
-        // Apply blocker event
-        if (dayEvent.blockCardId) {
-          if (dayEvent.blockCardId === 'random_dev_card') {
-            const devCards = updatedCards.filter(c => c.columnId === 'development' && !c.isBlocked);
-            if (devCards.length > 0) {
-              const target = devCards[Math.floor(Math.random() * devCards.length)];
-              updatedCards = updatedCards.map(c => {
-                if (c.id === target.id) {
-                  return {
-                    ...c,
-                    isBlocked: true,
-                    blockerReason: dayEvent.blockedReason || 'Production blocker.',
-                  };
-                }
-                return c;
-              });
-              logs.push(`[Blocker Event] "${target.title}" is now blocked: ${dayEvent.blockedReason}`);
-            }
-          }
-        }
+      // Day 2 trade show capacity modifier carry-over check
+      if (!nextEvent && (nextDay % 5 === 2) && prev.currentDayEvent?.title.includes('Trade Show')) {
+        nextEvent = {
+          title: 'Trade Show Prep - Day 2',
+          description: 'Developers are finishing trade show prep. All capacity rolls still suffer a -1 modifier today.',
+          capacityChange: [
+            { avatarId: 'alice', description: 'Trade show prep', rollModifier: -1 },
+            { avatarId: 'bob', description: 'Trade show prep', rollModifier: -1 },
+            { avatarId: 'charlie', description: 'Trade show prep', rollModifier: -1 }
+          ]
+        };
+      }
+
+      // OS Upgrade Day 2/3 blocker risk warning
+      if (!nextEvent && ((nextDay % 5 === 2) || (nextDay % 5 === 3)) && prev.currentDayEvent?.title.includes('Client OS Upgrade')) {
+        nextEvent = {
+          title: 'Client OS Upgrade - Environment Drift',
+          description: 'Laptops updated, but environments are unstable. Blocker risk remains at 30% today.'
+        };
+      }
+
+      if (nextEvent) {
+        logs.push(`Event: ${nextEvent.title}`);
+        logs.push(nextEvent.description);
       }
 
       // Reset developer assignments for the new day
@@ -696,6 +1023,8 @@ export const useGameState = () => {
         assignedAvatars: [],
       }));
 
+      const isGameOver = nextDay > (prev.config?.maxDays ?? 10);
+
       return {
         ...prev,
         day: nextDay,
@@ -704,9 +1033,14 @@ export const useGameState = () => {
         avatars: resetAvatars,
         pairingAllowed,
         rolledToday: false,
-        gamePhase: 'day_start',
-        currentDayEvent: dayEvent,
+        gamePhase: isGameOver ? 'game_over' : 'day_start',
+        currentDayEvent: nextEvent,
+        nextEventId: null, // Reset event queue
         eventLogs: logs,
+        wipLimitsActive,
+        shiftLeftActive,
+        swarmingActive,
+        smallerBatchesActive,
       };
     });
   }, []);
@@ -754,10 +1088,20 @@ export const useGameState = () => {
       const poolIndex = Math.floor(Math.random() * BACKLOG_CARD_POOL.length);
       const template = BACKLOG_CARD_POOL[poolIndex];
 
+      let analysis = Math.floor(Math.random() * 3) + 1;
+      let development = Math.floor(Math.random() * 5) + 2;
+      let testing = Math.floor(Math.random() * 3) + 1;
+
+      if (prev.smallerBatchesActive) {
+        analysis = Math.max(1, Math.round(analysis / 2));
+        development = Math.max(1, Math.round(development / 2));
+        testing = Math.max(1, Math.round(testing / 2));
+      }
+
       const effort = {
-        analysis: Math.floor(Math.random() * 3) + 1,
-        development: Math.floor(Math.random() * 5) + 2,
-        testing: Math.floor(Math.random() * 3) + 1
+        analysis,
+        development,
+        testing
       };
 
       const newCardId = `card_replenished_${generateId()}`;
@@ -786,6 +1130,213 @@ export const useGameState = () => {
     });
   }, []);
 
+  // Fast Forward to Week's End
+  const fastForwardToWeekEnd = useCallback(() => {
+    setGameState(prev => {
+      const currentDay = prev.day;
+      const currentDayInWeek = currentDay % 5 === 0 ? 5 : currentDay % 5;
+      const daysToAdvance = 5 - currentDayInWeek;
+      if (daysToAdvance <= 0) return prev; // Already at week end
+
+      const targetDay = currentDay + daysToAdvance;
+      const completedCards = prev.cards.filter(c => c.columnId === 'done');
+      const columnWIP: { [key: string]: number } = {};
+      prev.columns.forEach(col => {
+        columnWIP[col.id] = prev.cards.filter(c => c.columnId === col.id).length;
+      });
+
+      let totalCycleTime = 0;
+      let totalLeadTime = 0;
+      completedCards.forEach(c => {
+        const lead = c.completedAt !== null ? c.completedAt - c.createdAt : 0;
+        const cycle = c.completedAt !== null && c.startedAt !== null ? c.completedAt - c.startedAt : lead;
+        totalLeadTime += lead;
+        totalCycleTime += cycle;
+      });
+
+      const averageCycleTime = completedCards.length > 0 ? parseFloat((totalCycleTime / completedCards.length).toFixed(1)) : null;
+      const averageLeadTime = completedCards.length > 0 ? parseFloat((totalLeadTime / completedCards.length).toFixed(1)) : null;
+
+      const mockLogs: DailyLog[] = [];
+      let lastCumulative = prev.dailyLogs.length > 0 ? prev.dailyLogs[prev.dailyLogs.length - 1].cumulativeThroughput : 0;
+
+      for (let d = currentDay; d <= targetDay; d++) {
+        mockLogs.push({
+          day: d,
+          columnWIP,
+          throughput: 0,
+          cumulativeThroughput: lastCumulative,
+          averageCycleTime,
+          averageLeadTime,
+          wipLimitsActive: prev.wipLimitsActive,
+          shiftLeftActive: prev.shiftLeftActive,
+          swarmingActive: prev.swarmingActive,
+          smallerBatchesActive: prev.smallerBatchesActive,
+        });
+      }
+
+      const logs = [...prev.eventLogs, `--- Fast Forwarded from Day ${currentDay} to Day ${targetDay} (Week's End) ---`];
+
+      return {
+        ...prev,
+        day: targetDay,
+        dailyLogs: [...prev.dailyLogs, ...mockLogs],
+        gamePhase: 'week_summary',
+        eventLogs: logs
+      };
+    });
+  }, []);
+
+  // Inject custom urgent work (Expedite cards)
+  const injectCustomExpediteCards = useCallback((titlePrefix: string, count: number) => {
+    setGameState(prev => {
+      const logs = [...prev.eventLogs, `[Alert] Injecting ${count} EXPEDITE cards: "${titlePrefix}" - Emergency work added by instructor.`];
+      const newCardsList: Card[] = [];
+      
+      for (let i = 0; i < count; i++) {
+        const id = `card_custom_expedite_${generateId()}_${i}`;
+        const newCard: Card = {
+          id,
+          title: count > 1 ? `${titlePrefix} (Part ${i + 1}/${count})` : titlePrefix,
+          description: `Emergency work injected by instructor. Critical response required immediately.`,
+          type: 'expedite',
+          columnId: 'ready',
+          effort: { analysis: 0, development: 2, testing: 1 },
+          remainingEffort: { analysis: 0, development: 2, testing: 1 },
+          assignedAvatars: [],
+          isBlocked: false,
+          failedQACount: 0,
+          createdAt: prev.day,
+          completedAt: null,
+          startedAt: null,
+          history: [{ day: prev.day, columnId: 'ready' }]
+        };
+        newCardsList.push(newCard);
+      }
+
+      let updatedCards = [...prev.cards, ...newCardsList];
+
+      // Auto block 50% of active development cards
+      const devCards = updatedCards.filter(c => c.columnId === 'development' && !c.isBlocked);
+      if (devCards.length > 0) {
+        const countToBlock = Math.ceil(devCards.length / 2);
+        let blockedCount = 0;
+        updatedCards = updatedCards.map(card => {
+          if (card.columnId === 'development' && !card.isBlocked && blockedCount < countToBlock) {
+            blockedCount++;
+            logs.push(`[Blocker] Card "${card.title}" has been BLOCKED to free up capacity for emergency response.`);
+            return {
+              ...card,
+              isBlocked: true,
+              blockerReason: 'Blocked due to system emergency response.'
+            };
+          }
+          return card;
+        });
+      }
+
+      return {
+        ...prev,
+        cards: updatedCards,
+        eventLogs: logs
+      };
+    });
+  }, []);
+
+  // Split Epic Card
+  const splitEpic = useCallback((epicId: string) => {
+    setGameState(prev => {
+      const epic = prev.cards.find(c => c.id === epicId);
+      if (!epic) return prev;
+
+      const child1Id = `card_${generateId()}_c1`;
+      const child1: Card = {
+        id: child1Id,
+        title: `${epic.title} - Core Engine`,
+        description: `Implement foundational backend core for: ${epic.title}`,
+        type: 'standard',
+        columnId: 'ready',
+        effort: { analysis: 1, development: 4, testing: 2 },
+        remainingEffort: { analysis: 1, development: 4, testing: 2 },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: prev.day,
+        completedAt: null,
+        startedAt: null,
+        history: [{ day: prev.day, columnId: 'ready' }],
+        parentEpicId: epic.id
+      };
+
+      const child2Id = `card_${generateId()}_c2`;
+      const child2: Card = {
+        id: child2Id,
+        title: `${epic.title} - UI Layout`,
+        description: `Design and code user screens and layouts for: ${epic.title}`,
+        type: 'standard',
+        columnId: 'ready',
+        effort: { analysis: 1, development: 4, testing: 2 },
+        remainingEffort: { analysis: 1, development: 4, testing: 2 },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: prev.day,
+        completedAt: null,
+        startedAt: null,
+        history: [{ day: prev.day, columnId: 'ready' }],
+        parentEpicId: epic.id
+      };
+
+      const child3Id = `card_${generateId()}_c3`;
+      const child3: Card = {
+        id: child3Id,
+        title: `${epic.title} - Mock Payment`,
+        description: `Add payment processing integration for: ${epic.title}`,
+        type: 'standard',
+        columnId: 'ready',
+        effort: { analysis: 2, development: 4, testing: 2 },
+        remainingEffort: { analysis: 2, development: 4, testing: 2 },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: prev.day,
+        completedAt: null,
+        startedAt: null,
+        history: [{ day: prev.day, columnId: 'ready' }],
+        parentEpicId: epic.id
+      };
+
+      const logs = [...prev.eventLogs, `[Split] Epic "${epic.title}" split into 3 independent child stories.`];
+
+      const updatedCards = prev.cards.map(c => {
+        if (c.id === epicId) {
+          return {
+            ...c,
+            columnId: 'epic_pool',
+            isEpic: true,
+            type: 'epic' as const,
+            epicProgress: 0,
+            childCardIds: [child1Id, child2Id, child3Id]
+          };
+        }
+        return c;
+      });
+
+      return {
+        ...prev,
+        cards: [...updatedCards, child1, child2, child3],
+        eventLogs: logs
+      };
+    });
+  }, []);
+
+  // Queue next event
+  const queueEvent = useCallback((eventId: string | null) => {
+    setGameState(prev => ({
+      ...prev,
+      nextEventId: eventId
+    }));
+  }, []);
 
   return {
     gameState,
@@ -799,5 +1350,9 @@ export const useGameState = () => {
     setWipLimit,
     renameColumn,
     replenishBacklog,
+    fastForwardToWeekEnd,
+    injectCustomExpediteCards,
+    splitEpic,
+    queueEvent
   };
 };

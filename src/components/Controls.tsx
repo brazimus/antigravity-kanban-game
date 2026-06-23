@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from 'react';
+import React, { useRef, useEffect, useState } from 'react';
 import type { GameState } from '../types';
 import { Dices, RotateCcw, ArrowRight, CheckSquare, BookOpen } from 'lucide-react';
 
@@ -6,12 +6,19 @@ interface ControlsProps {
   gameState: GameState;
   onRollDice: () => void;
   onEndDay: () => void;
-  onStartNextDay: () => void;
+  onStartNextDay: (accelerators?: {
+    wipLimitsActive?: boolean;
+    shiftLeftActive?: boolean;
+    swarmingActive?: boolean;
+    smallerBatchesActive?: boolean;
+  }) => void;
   onRestartGame: () => void;
   onResetDailyWork: () => void;
   isMultiplayer?: boolean;
   isAdmin?: boolean;
   onQueueEvent?: (eventId: string | null) => void;
+  onFastForward?: () => void;
+  onInjectCustomExpediteCards?: (titlePrefix: string, count: number) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -23,9 +30,29 @@ export const Controls: React.FC<ControlsProps> = ({
   onResetDailyWork,
   isMultiplayer = false,
   isAdmin = false,
-  onQueueEvent
+  onQueueEvent,
+  onFastForward,
+  onInjectCustomExpediteCards
 }) => {
   const logEndRef = useRef<HTMLDivElement>(null);
+
+  // Local states for weekend accelerator selectors
+  const [wipLimitsActive, setWipLimitsActive] = useState(gameState.wipLimitsActive || false);
+  const [shiftLeftActive, setShiftLeftActive] = useState(gameState.shiftLeftActive || false);
+  const [swarmingActive, setSwarmingActive] = useState(gameState.swarmingActive || false);
+  const [smallerBatchesActive, setSmallerBatchesActive] = useState(gameState.smallerBatchesActive || false);
+
+  // Local states for custom urgent work injector
+  const [urgentTitle, setUrgentTitle] = useState('Security Breach Resolution');
+  const [urgentCount, setUrgentCount] = useState(2);
+
+  // Synchronize local states with gameState reactively
+  useEffect(() => {
+    setWipLimitsActive(gameState.wipLimitsActive || false);
+    setShiftLeftActive(gameState.shiftLeftActive || false);
+    setSwarmingActive(gameState.swarmingActive || false);
+    setSmallerBatchesActive(gameState.smallerBatchesActive || false);
+  }, [gameState.wipLimitsActive, gameState.shiftLeftActive, gameState.swarmingActive, gameState.smallerBatchesActive, gameState.gamePhase]);
 
   // Auto-scroll logs to bottom
   useEffect(() => {
@@ -142,12 +169,83 @@ export const Controls: React.FC<ControlsProps> = ({
               </p>
             ) : (
               <button 
-                onClick={onStartNextDay} 
+                onClick={() => onStartNextDay()} 
                 className="btn btn-primary pulse-primary" 
                 style={{ width: '100%', padding: '12px', backgroundColor: 'var(--secondary)', boxShadow: '0 0 15px rgba(6, 182, 212, 0.3)' }}
               >
                 <ArrowRight size={16} /> Start Day {gameState.day + 1}
               </button>
+            )
+          )}
+
+          {gameState.gamePhase === 'week_summary' && (
+            isMultiplayer && !isAdmin ? (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                Weekend: Reviewing week performance. Waiting for instructor to select next week parameters...
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <h3 style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '5px' }}>
+                  Weekend Settings: Select Flow Accelerators
+                </h3>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', backgroundColor: 'rgba(255,255,255,0.02)', padding: '10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-glass)' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={wipLimitsActive} 
+                      onChange={(e) => setWipLimitsActive(e.target.checked)} 
+                    />
+                    <div>
+                      <strong>WIP Limits & Pairing</strong>
+                      <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', margin: 0 }}>Analysis(2), Dev(2), Test(1). Enables dev pairing.</p>
+                    </div>
+                  </label>
+                  
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={shiftLeftActive} 
+                      onChange={(e) => setShiftLeftActive(e.target.checked)} 
+                    />
+                    <div>
+                      <strong>Shift-Left Option B</strong>
+                      <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', margin: 0 }}>Eliminates Testing column. Dev/Test dials concurrent in Dev.</p>
+                    </div>
+                  </label>
+                  
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={swarmingActive} 
+                      onChange={(e) => setSwarmingActive(e.target.checked)} 
+                    />
+                    <div>
+                      <strong>Cross-Functional Swarming</strong>
+                      <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', margin: 0 }}>Bypasses context switch penalty for dev following card.</p>
+                    </div>
+                  </label>
+                  
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.75rem', cursor: 'pointer' }}>
+                    <input 
+                      type="checkbox" 
+                      checked={smallerBatchesActive} 
+                      onChange={(e) => setSmallerBatchesActive(e.target.checked)} 
+                    />
+                    <div>
+                      <strong>Story Splitting & Smaller Batches</strong>
+                      <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', margin: 0 }}>Halves backlog card effort. Splits Trade Show Epic.</p>
+                    </div>
+                  </label>
+                </div>
+                
+                <button 
+                  onClick={() => onStartNextDay({ wipLimitsActive, shiftLeftActive, swarmingActive, smallerBatchesActive })} 
+                  className="btn btn-primary pulse-primary" 
+                  style={{ width: '100%', padding: '12px', backgroundColor: 'var(--accent-green)', boxShadow: 'var(--shadow-neon-success)' }}
+                >
+                  🚀 Launch Next Week (Days {gameState.day + 1}-{gameState.day + 5})
+                </button>
+              </div>
             )
           )}
 
@@ -169,6 +267,86 @@ export const Controls: React.FC<ControlsProps> = ({
           )}
         </div>
       </div>
+
+      {/* Fast Forward Option (Admins / Local players during active weekdays) */}
+      {onFastForward && gameState.day % 5 !== 0 && gameState.gamePhase !== 'week_summary' && gameState.gamePhase !== 'game_over' && (!isMultiplayer || isAdmin) && (
+        <div className="glass-panel" style={{ padding: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: 'rgba(245, 158, 11, 0.02)', border: '1px solid rgba(245, 158, 11, 0.15)', borderRadius: 'var(--radius-sm)' }}>
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Class understands flow early?</span>
+          <button
+            onClick={onFastForward}
+            className="btn btn-secondary"
+            style={{ padding: '6px 10px', fontSize: '0.75rem', color: 'var(--accent-amber)', borderColor: 'rgba(245, 158, 11, 0.3)', backgroundColor: 'transparent', cursor: 'pointer' }}
+          >
+            Fast Forward ⏭️
+          </button>
+        </div>
+      )}
+
+      {/* Admin Custom Urgent Work Injector Form */}
+      {onInjectCustomExpediteCards && (!isMultiplayer || isAdmin) && gameState.gamePhase !== 'intro' && gameState.gamePhase !== 'game_over' && (
+        <div className="glass-panel" style={{ padding: '12px', borderLeft: '4px solid var(--accent-red)', borderRadius: 'var(--radius-sm)' }}>
+          <h3 style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--accent-red)', textTransform: 'uppercase', marginBottom: '6px' }}>
+            🚨 Urgent Work Injector
+          </h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+              <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Card Title / Prefix</label>
+              <input
+                type="text"
+                value={urgentTitle}
+                onChange={(e) => setUrgentTitle(e.target.value)}
+                style={{
+                  padding: '4px 8px',
+                  fontSize: '0.7rem',
+                  backgroundColor: 'rgba(0,0,0,0.2)',
+                  border: '1px solid var(--border-glass)',
+                  borderRadius: '4px',
+                  color: '#fff'
+                }}
+              />
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', flex: 1 }}>
+                <label style={{ fontSize: '0.6rem', color: 'var(--text-muted)' }}>Quantity</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={5}
+                  value={urgentCount}
+                  onChange={(e) => setUrgentCount(parseInt(e.target.value) || 1)}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: '0.7rem',
+                    backgroundColor: 'rgba(0,0,0,0.2)',
+                    border: '1px solid var(--border-glass)',
+                    borderRadius: '4px',
+                    color: '#fff',
+                    width: '100%'
+                  }}
+                />
+              </div>
+              <button
+                onClick={() => onInjectCustomExpediteCards(urgentTitle, urgentCount)}
+                className="btn btn-primary"
+                style={{
+                  fontSize: '0.7rem',
+                  padding: '6px 10px',
+                  backgroundColor: 'var(--accent-red)',
+                  boxShadow: '0 0 10px rgba(244, 63, 94, 0.2)',
+                  borderColor: 'rgba(244, 63, 94, 0.3)',
+                  height: '26px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer'
+                }}
+              >
+                Inject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Instructor Scenario Controller (Multiplayer & Admin Only) */}
       {isMultiplayer && isAdmin && onQueueEvent && (

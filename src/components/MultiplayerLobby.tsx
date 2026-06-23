@@ -4,13 +4,14 @@ import {
   createUserWithEmailAndPassword, 
   signInAnonymously 
 } from 'firebase/auth';
-import { doc, getDoc, setDoc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, onSnapshot, deleteDoc, getDocs } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { Shield, User, Play, LogIn, UserPlus, Plus, Trash2 } from 'lucide-react';
+import { Shield, User, Play, LogIn, UserPlus, Plus, Trash2, ChevronDown, ChevronUp, Settings } from 'lucide-react';
+import type { GameConfig } from '../types';
 
 interface MultiplayerLobbyProps {
   onJoinAsPlayer: (roomCode: string, name: string, color: string, playerId: string) => void;
-  onJoinAsAdmin: (roomCode: string, adminId: string, isNew: boolean, scenarioId: string) => void;
+  onJoinAsAdmin: (roomCode: string, adminId: string, isNew: boolean, scenarioId: string, config?: GameConfig) => void;
 }
 
 const AVATAR_COLORS = [
@@ -54,6 +55,16 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   const [whitelist, setWhitelist] = useState<string[]>([]);
   const [newWhitelistEmail, setNewWhitelistEmail] = useState('');
   const [whitelistError, setWhitelistError] = useState<string | null>(null);
+
+  // Game Config Settings States
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [configMaxDays, setConfigMaxDays] = useState(10);
+  const [configBlockerChance, setConfigBlockerChance] = useState(15); // percentage
+  const [configQaUnpaired, setConfigQaUnpaired] = useState(20);       // percentage
+  const [configQaPaired, setConfigQaPaired] = useState(2);           // percentage
+  const [configUnblockCost, setConfigUnblockCost] = useState(2);
+  const [configPairingCost, setConfigPairingCost] = useState(2);
+  const [gamesList, setGamesList] = useState<any[]>([]);
 
   // Generate a random 6-character suggested room code
   const suggestRoomCode = () => {
@@ -186,6 +197,68 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
     return () => unsubscribe();
   }, [adminLoggedIn]);
 
+  // Real-time synchronization of active game sessions created by current admin
+  React.useEffect(() => {
+    if (!adminLoggedIn || !adminUid) return;
+
+    const colRef = collection(db, 'games');
+    const unsubscribe = onSnapshot(colRef, (snapshot) => {
+      const games: any[] = [];
+      snapshot.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.adminId === adminUid) {
+          games.push({
+            id: docSnap.id,
+            ...data
+          });
+        }
+      });
+      setGamesList(games.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)));
+    }, (err) => {
+      console.error("Failed to load games list:", err);
+    });
+
+    return () => unsubscribe();
+  }, [adminLoggedIn, adminUid]);
+
+  // Double-confirmation Game Session Deletion
+  const handleDeleteGame = async (code: string) => {
+    const confirm1 = window.confirm(`Are you sure you want to delete room "${code}"? This will permanently erase all cards, players, and logs.`);
+    if (!confirm1) return;
+    
+    const confirm2 = window.prompt(`To confirm deletion of room "${code}", please type the room code below:`);
+    if (confirm2 !== code) {
+      alert("Confirmation failed. Room was not deleted.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Delete all cards in the subcollection
+      const cardsSnap = await getDocs(collection(db, 'games', code, 'cards'));
+      const deletePromises: Promise<void>[] = [];
+      cardsSnap.forEach(docSnap => {
+        deletePromises.push(deleteDoc(docSnap.ref));
+      });
+      
+      // 2. Delete all players in the subcollection
+      const playersSnap = await getDocs(collection(db, 'games', code, 'players'));
+      playersSnap.forEach(docSnap => {
+        deletePromises.push(deleteDoc(docSnap.ref));
+      });
+
+      await Promise.all(deletePromises);
+
+      // 3. Delete the parent game document
+      await deleteDoc(doc(db, 'games', code));
+    } catch (err: any) {
+      console.error("Failed to delete room:", err);
+      alert(err.message || 'Failed to delete room.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Add new email to approved instructors whitelist
   const handleAddWhitelist = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,7 +341,16 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
         }
       }
 
-      onJoinAsAdmin(formattedCode, adminUid, true, selectedScenario);
+      const customConfig: GameConfig = {
+        maxDays: Number(configMaxDays),
+        blockerChance: Number(configBlockerChance) / 100,
+        qaFailChanceUnpaired: Number(configQaUnpaired) / 100,
+        qaFailChancePaired: Number(configQaPaired) / 100,
+        unblockCost: Number(configUnblockCost),
+        pairingHelpCost: Number(configPairingCost)
+      };
+
+      onJoinAsAdmin(formattedCode, adminUid, true, selectedScenario, customConfig);
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'Failed to check or create room code.');
@@ -657,6 +739,177 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                         </select>
                       </div>
 
+                      {/* Advanced Configuration Accordion */}
+                      <div style={{ marginTop: '5px' }}>
+                        <button
+                          type="button"
+                          onClick={() => setShowAdvanced(!showAdvanced)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--secondary)',
+                            fontSize: '0.75rem',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                            padding: '4px 0',
+                            fontWeight: 600
+                          }}
+                        >
+                          <Settings size={12} />
+                          <span>{showAdvanced ? 'Hide Advanced Options' : 'Show Advanced Options'}</span>
+                          {showAdvanced ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        </button>
+
+                        {showAdvanced && (
+                          <div style={{
+                            marginTop: '10px',
+                            padding: '12px',
+                            borderRadius: 'var(--radius-sm)',
+                            backgroundColor: 'rgba(0,0,0,0.2)',
+                            border: '1px solid var(--border-glass)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px'
+                          }}>
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '3px', fontWeight: 600 }}>
+                                MAX SIMULATION DAYS
+                              </label>
+                              <input
+                                type="number"
+                                min="5"
+                                max="30"
+                                value={configMaxDays}
+                                onChange={(e) => setConfigMaxDays(Math.max(5, Math.min(30, Number(e.target.value))))}
+                                style={{
+                                  width: '100%',
+                                  padding: '6px 10px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  backgroundColor: 'rgba(0,0,0,0.3)',
+                                  border: '1px solid var(--border-glass)',
+                                  color: '#fff',
+                                  fontSize: '0.8rem'
+                                }}
+                              />
+                            </div>
+
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '3px', fontWeight: 600 }}>
+                                BLOCKER PROBABILITY (%)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={configBlockerChance}
+                                onChange={(e) => setConfigBlockerChance(Math.max(0, Math.min(100, Number(e.target.value))))}
+                                style={{
+                                  width: '100%',
+                                  padding: '6px 10px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  backgroundColor: 'rgba(0,0,0,0.3)',
+                                  border: '1px solid var(--border-glass)',
+                                  color: '#fff',
+                                  fontSize: '0.8rem'
+                                }}
+                              />
+                            </div>
+
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '3px', fontWeight: 600 }}>
+                                QA FAIL CHANCE - UNPAIRED (%)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={configQaUnpaired}
+                                onChange={(e) => setConfigQaUnpaired(Math.max(0, Math.min(100, Number(e.target.value))))}
+                                style={{
+                                  width: '100%',
+                                  padding: '6px 10px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  backgroundColor: 'rgba(0,0,0,0.3)',
+                                  border: '1px solid var(--border-glass)',
+                                  color: '#fff',
+                                  fontSize: '0.8rem'
+                                }}
+                              />
+                            </div>
+
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '3px', fontWeight: 600 }}>
+                                QA FAIL CHANCE - PAIRED (%)
+                              </label>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={configQaPaired}
+                                onChange={(e) => setConfigQaPaired(Math.max(0, Math.min(100, Number(e.target.value))))}
+                                style={{
+                                  width: '100%',
+                                  padding: '6px 10px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  backgroundColor: 'rgba(0,0,0,0.3)',
+                                  border: '1px solid var(--border-glass)',
+                                  color: '#fff',
+                                  fontSize: '0.8rem'
+                                }}
+                              />
+                            </div>
+
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '3px', fontWeight: 600 }}>
+                                  UNBLOCK COST
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="5"
+                                  value={configUnblockCost}
+                                  onChange={(e) => setConfigUnblockCost(Math.max(1, Math.min(5, Number(e.target.value))))}
+                                  style={{
+                                    width: '100%',
+                                    padding: '6px 10px',
+                                    borderRadius: 'var(--radius-sm)',
+                                    backgroundColor: 'rgba(0,0,0,0.3)',
+                                    border: '1px solid var(--border-glass)',
+                                    color: '#fff',
+                                    fontSize: '0.8rem'
+                                  }}
+                                />
+                              </div>
+
+                              <div style={{ flex: 1 }}>
+                                <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '3px', fontWeight: 600 }}>
+                                  PAIR HELP COST
+                                </label>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="5"
+                                  value={configPairingCost}
+                                  onChange={(e) => setConfigPairingCost(Math.max(1, Math.min(5, Number(e.target.value))))}
+                                  style={{
+                                    width: '100%',
+                                    padding: '6px 10px',
+                                    borderRadius: 'var(--radius-sm)',
+                                    backgroundColor: 'rgba(0,0,0,0.3)',
+                                    border: '1px solid var(--border-glass)',
+                                    color: '#fff',
+                                    fontSize: '0.8rem'
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <button
                         type="submit"
                         disabled={loading}
@@ -708,6 +961,82 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                       </button>
                     </div>
                   </form>
+
+                  {/* Simulation Manager Dashboard (Admin Only) */}
+                  <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '20px', marginTop: '10px' }}>
+                    <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700 }}>
+                      <Play size={14} /> Active Simulations
+                    </h4>
+                    
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column', 
+                      gap: '8px', 
+                      maxHeight: '180px', 
+                      overflowY: 'auto',
+                      backgroundColor: 'rgba(0,0,0,0.15)',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-glass)',
+                      padding: '8px'
+                    }}>
+                      {gamesList.length === 0 ? (
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', margin: '10px 0' }}>
+                          No active simulations found. Create one above!
+                        </p>
+                      ) : (
+                        gamesList.map(game => (
+                          <div 
+                            key={game.id} 
+                            style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center', 
+                              padding: '8px', 
+                              borderBottom: '1px solid rgba(255,255,255,0.03)',
+                              fontSize: '0.75rem',
+                              backgroundColor: 'rgba(255,255,255,0.02)',
+                              borderRadius: '3px'
+                            }}
+                          >
+                            <div>
+                              <span style={{ color: '#fff', fontWeight: 600 }}>Room: {game.id}</span>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                Day {game.day}/{game.maxDays} | Scenario: {game.activeScenarioId}
+                              </div>
+                            </div>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                type="button"
+                                onClick={() => onJoinAsAdmin(game.id, adminUid || '', false, game.activeScenarioId || 'easy_mode')}
+                                className="btn btn-secondary"
+                                style={{ padding: '3px 8px', fontSize: '0.65rem' }}
+                              >
+                                Resume
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteGame(game.id)}
+                                style={{ 
+                                  background: 'none', 
+                                  border: '1px solid rgba(244,63,94,0.3)', 
+                                  borderRadius: '3px',
+                                  color: 'var(--accent-red)', 
+                                  cursor: 'pointer',
+                                  padding: '3px 6px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center'
+                                }}
+                                title="Delete Room"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
 
                   {/* Whitelist Manager Section */}
                   <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '20px', marginTop: '10px' }}>
