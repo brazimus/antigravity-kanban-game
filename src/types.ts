@@ -123,5 +123,6 @@ export interface GameState {
   customEventTitle?: string;
   customEventCount?: number;
   lastSelectedScenarioId?: string;
+  showStartOfDayModal?: boolean;
 }
 

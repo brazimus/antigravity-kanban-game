@@ -191,7 +191,7 @@ export const Board: React.FC<BoardProps> = ({
                     Empty column. Pull cards here.
                   </div>
                 ) : (
-                  columnCards.map(card => (
+                  columnCards.map((card, idx) => (
                     <CardComponent 
                       key={card.id}
                       card={card}
@@ -206,6 +206,8 @@ export const Board: React.FC<BoardProps> = ({
                       onSplitEpic={onSplitEpic}
                       shiftLeftActive={shiftLeftActive}
                       swarmingActive={swarmingActive}
+                      isFirst={idx === 0}
+                      isLast={idx === columnCards.length - 1}
                     />
                   ))
                 )}

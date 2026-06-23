@@ -254,3 +254,21 @@ h1, h2, h3, h4, h5, h6 {
   transform: translateY(-2px);
 }
 
+@keyframes highlightWidgetGlow {
+  0% {
+    border-color: var(--primary);
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+    outline: 2px solid var(--primary);
+  }
+  100% {
+    border-color: var(--border-glass);
+    box-shadow: none;
+    outline: 2px solid transparent;
+  }
+}
+
+.highlight-changed-day {
+  animation: highlightWidgetGlow 1.5s ease-out;
+}
+
+

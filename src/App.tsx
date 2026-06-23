@@ -6,7 +6,7 @@ import { Controls } from './components/Controls';
 import { Dashboard } from './components/Dashboard';
 import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { 
-  LayoutGrid, BarChart3, Play, HelpCircle 
+  LayoutGrid, BarChart3, Play, HelpCircle, Calendar, BookOpen
 } from 'lucide-react';
 import type { GameConfig } from './types';
 import './App.css';
@@ -467,6 +467,170 @@ function App() {
                 style={{ padding: '8px 20px' }}
               >
                 Got It!
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* START OF DAY MODAL FOR SINGLE PLAYER */}
+      {mode !== 'multi' && gameState.gamePhase === 'day_start' && gameState.showStartOfDayModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(10, 15, 30, 0.8)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 100,
+          padding: '20px'
+        }}>
+          <div className="glass-panel" style={{
+            maxWidth: '550px',
+            width: '100%',
+            padding: '30px',
+            borderRadius: 'var(--radius-lg)',
+            backgroundColor: 'rgba(15, 23, 42, 0.85)',
+            border: '1px solid rgba(139, 92, 246, 0.2)',
+            boxShadow: '0 0 30px rgba(139, 92, 246, 0.15), 0 20px 50px rgba(0, 0, 0, 0.6)',
+            maxHeight: '90vh',
+            overflowY: 'auto'
+          }}>
+            {/* Header */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px', borderBottom: '1px solid var(--border-glass)', paddingBottom: '12px' }}>
+              <div style={{
+                width: '36px',
+                height: '36px',
+                borderRadius: '50%',
+                backgroundColor: 'rgba(139, 92, 246, 0.15)',
+                color: 'var(--primary)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}>
+                <Calendar size={18} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '1.4rem', color: '#fff', fontWeight: 800 }}>
+                  Day {gameState.day} Has Begun
+                </h2>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Daily bulletin and simulation initialization logs</p>
+              </div>
+            </div>
+
+            {/* Daily Event / Bulletin */}
+            {gameState.currentDayEvent ? (
+              <div className="glass-panel" style={{ 
+                padding: '16px', 
+                backgroundColor: 'rgba(6, 182, 212, 0.03)', 
+                borderColor: 'rgba(6, 182, 212, 0.25)',
+                marginBottom: '20px',
+                borderLeft: '4px solid var(--secondary)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px', color: 'var(--secondary)' }}>
+                  <BookOpen size={16} />
+                  <h3 style={{ fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>
+                    Daily Bulletin
+                  </h3>
+                </div>
+                <h4 style={{ fontSize: '0.95rem', color: '#fff', marginBottom: '6px', fontWeight: 700 }}>
+                  {gameState.currentDayEvent.title}
+                </h4>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 0 }}>
+                  {gameState.currentDayEvent.description}
+                </p>
+                {gameState.currentDayEvent.capacityChange && gameState.currentDayEvent.capacityChange.length > 0 && (
+                  <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px solid rgba(6, 182, 212, 0.15)' }}>
+                    <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--accent-amber)', marginBottom: '4px' }}>Capacity Updates:</p>
+                    <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                      {gameState.currentDayEvent.capacityChange.map((change, idx) => (
+                        <li key={idx} style={{ marginBottom: '2px' }}>
+                          <strong>{change.avatarId.charAt(0).toUpperCase() + change.avatarId.slice(1)}:</strong> {change.description} (Roll modifier: {change.rollModifier > 0 ? `+${change.rollModifier}` : change.rollModifier})
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ 
+                padding: '12px', 
+                backgroundColor: 'rgba(255,255,255,0.02)', 
+                border: '1px dashed var(--border-glass)', 
+                borderRadius: 'var(--radius-sm)',
+                fontSize: '0.8rem',
+                color: 'var(--text-secondary)',
+                marginBottom: '20px',
+                textAlign: 'center'
+              }}>
+                No special events scheduled for today. Just standard sprint operations!
+              </div>
+            )}
+
+            {/* Start of Day Logs */}
+            {(() => {
+              const dayLogsStartIndex = gameState.eventLogs.findIndex(log => log.includes(`Start Day ${gameState.day}`));
+              const startOfDayLogs = dayLogsStartIndex !== -1
+                ? gameState.eventLogs.slice(dayLogsStartIndex + 1)
+                : [];
+              
+              const filteredLogs = startOfDayLogs.filter(log => {
+                if (gameState.currentDayEvent) {
+                  return !log.includes(gameState.currentDayEvent.title) && 
+                         !log.includes(gameState.currentDayEvent.description) &&
+                         !log.startsWith('Event:');
+                }
+                return true;
+              });
+
+              if (filteredLogs.length === 0) return null;
+
+              return (
+                <div style={{ marginBottom: '25px' }}>
+                  <h3 style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '8px', fontWeight: 700 }}>
+                    Initialization Logs
+                  </h3>
+                  <div style={{ 
+                    backgroundColor: 'rgba(0, 0, 0, 0.2)', 
+                    borderRadius: 'var(--radius-sm)', 
+                    padding: '12px', 
+                    border: '1px solid var(--border-glass)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '6px',
+                    fontFamily: 'monospace',
+                    fontSize: '0.72rem'
+                  }}>
+                    {filteredLogs.map((log, idx) => {
+                      let color = 'var(--text-secondary)';
+                      if (log.startsWith('[Alert]') || log.startsWith('[Warning]')) color = 'var(--accent-amber)';
+                      else if (log.startsWith('[System]')) color = 'var(--primary)';
+                      else if (log.startsWith('[Shift-Left Migration]')) color = 'var(--secondary)';
+                      
+                      return (
+                        <div key={idx} style={{ color, lineHeight: 1.3 }}>
+                          • {log}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Footer Button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => singleEngine.dismissStartOfDayModal()} 
+                className="btn btn-primary pulse-primary"
+                style={{ padding: '10px 24px', fontSize: '0.85rem' }}
+              >
+                Continue to Roll Capacity
               </button>
             </div>
           </div>

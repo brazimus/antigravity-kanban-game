@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState } from 'react';
 import type { GameState } from '../types';
-import { Dices, RotateCcw, ArrowRight, CheckSquare, BookOpen, RefreshCw, Shield, Zap, Users, Scissors, Calendar, AlertTriangle, Monitor, Sparkles } from 'lucide-react';
+import { Dices, RotateCcw, ArrowRight, CheckSquare, BookOpen, RefreshCw, Shield, Zap, Users, Scissors, Calendar, AlertTriangle, Monitor, Sparkles, ArrowDown } from 'lucide-react';
 
 const RECOMMENDATION_MAP: { [key: string]: string } = {
   'tradeshow': 'smaller_batches',
@@ -124,6 +124,44 @@ export const Controls: React.FC<ControlsProps> = ({
   const [urgentTitle, setUrgentTitle] = useState('Security Breach Resolution');
   const [urgentCount, setUrgentCount] = useState(2);
 
+  // Local states for off-viewport unread log indicator
+  const [isLogsVisible, setIsLogsVisible] = useState(true);
+  const [unreadLogs, setUnreadLogs] = useState(false);
+  const lastLogCountRef = useRef(gameState.eventLogs.length);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
+
+  // Setup IntersectionObserver to track if simulation logs are visible
+  useEffect(() => {
+    if (typeof IntersectionObserver === 'undefined') return;
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsLogsVisible(entry.isIntersecting);
+      if (entry.isIntersecting) {
+        setUnreadLogs(false);
+      }
+    }, { threshold: 0.1 });
+
+    const currentRef = logsContainerRef.current;
+    if (currentRef) {
+      observer.observe(currentRef);
+    }
+
+    return () => {
+      if (currentRef) {
+        observer.unobserve(currentRef);
+      }
+    };
+  }, []);
+
+  // Track event logs updates and set unread flag if off-viewport
+  useEffect(() => {
+    if (gameState.eventLogs.length > lastLogCountRef.current) {
+      if (!isLogsVisible) {
+        setUnreadLogs(true);
+      }
+    }
+    lastLogCountRef.current = gameState.eventLogs.length;
+  }, [gameState.eventLogs, isLogsVisible]);
+
   // Synchronize local states with gameState reactively
   useEffect(() => {
     setWipLimitsActive(gameState.wipLimitsActive || false);
@@ -134,9 +172,12 @@ export const Controls: React.FC<ControlsProps> = ({
   }, [gameState.wipLimitsActive, gameState.shiftLeftActive, gameState.swarmingActive, gameState.smallerBatchesActive, gameState.gamePhase]);
 
 
-  // Auto-scroll logs to bottom
+  // Auto-scroll logs to bottom without viewport scrolling
   useEffect(() => {
-    logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = logEndRef.current?.parentElement;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
   }, [gameState.eventLogs]);
 
   // Calculate total remaining team capacity
@@ -151,7 +192,11 @@ export const Controls: React.FC<ControlsProps> = ({
     }}>
       
       {/* Simulation Status Card */}
-      <div className="glass-panel" style={{ padding: '15px', borderLeft: '4px solid var(--primary)' }}>
+      <div 
+        key={`status-card-${gameState.day}-${gameState.gamePhase}`}
+        className="glass-panel highlight-changed-day"
+        style={{ padding: '15px', borderLeft: '4px solid var(--primary)' }}
+      >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
           <h2 style={{ fontSize: '1.2rem', fontFamily: 'var(--font-title)', fontWeight: 700 }}>
             Day {gameState.day} <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>/ {gameState.maxDays}</span>
@@ -685,14 +730,19 @@ export const Controls: React.FC<ControlsProps> = ({
       )}
 
       {/* Event Logs Feed */}
-      <div className="glass-panel" style={{ 
-        flex: 1, 
-        padding: '15px', 
-        display: 'flex', 
-        flexDirection: 'column', 
-        minHeight: '180px',
-        maxHeight: '350px'
-      }}>
+      <div 
+        ref={logsContainerRef}
+        className="glass-panel" 
+        style={{ 
+          flex: 1, 
+          padding: '15px', 
+          display: 'flex', 
+          flexDirection: 'column', 
+          minHeight: '180px',
+          maxHeight: '350px',
+          position: 'relative'
+        }}
+      >
         <h3 style={{ fontSize: '0.85rem', marginBottom: '8px', textTransform: 'uppercase', color: 'var(--text-secondary)', borderBottom: '1px solid var(--border-glass)', paddingBottom: '6px' }}>
           Simulation Logs
         </h3>
@@ -734,6 +784,37 @@ export const Controls: React.FC<ControlsProps> = ({
           <RotateCcw size={10} /> Reset Game
         </button>
       </div>
+
+      {/* Off-viewport unread logs badge */}
+      {unreadLogs && (
+        <div 
+          onClick={() => {
+            logsContainerRef.current?.scrollIntoView({ behavior: 'smooth' });
+            setUnreadLogs(false);
+          }}
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            right: '20px',
+            backgroundColor: 'var(--primary)',
+            color: '#fff',
+            padding: '8px 14px',
+            borderRadius: 'var(--radius-sm)',
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            boxShadow: '0 4px 15px rgba(139, 92, 246, 0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            zIndex: 99,
+            animation: 'pulseGlow 2s infinite ease-in-out',
+            border: '1px solid rgba(255, 255, 255, 0.15)'
+          }}
+        >
+          <ArrowDown size={12} /> New Simulation Logs
+        </div>
+      )}
 
     </div>
   );

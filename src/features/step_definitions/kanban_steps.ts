@@ -1,5 +1,8 @@
-import { expect } from 'vitest';
-import { act } from '@testing-library/react';
+import { expect, vi } from 'vitest';
+import { act, render, screen, fireEvent, within } from '@testing-library/react';
+import React from 'react';
+import { CardComponent } from '../../components/CardComponent';
+import { Controls } from '../../components/Controls';
 import { BddRunner } from '../bdd_runner';
 
 export const registerSteps = (runner: BddRunner) => {
@@ -522,6 +525,153 @@ export const registerSteps = (runner: BddRunner) => {
   runner.register(/^the card stays in Analysis$/, (context) => {
     const card = context.result.current.gameState.cards.find((c: any) => c.id === context.incompleteCardId);
     expect(card.columnId).toBe('analysis');
+  });
+
+  runner.register(/^the start of day modal should be active$/, (context) => {
+    expect(context.result.current.gameState.showStartOfDayModal).toBe(true);
+  });
+
+  runner.register(/^the modal should display the event title "(.*)"$/, (context, eventTitle) => {
+    expect(context.result.current.gameState.currentDayEvent).toBeDefined();
+    expect(context.result.current.gameState.currentDayEvent.title).toBe(eventTitle);
+  });
+
+  runner.register(/^the user dismisses the start of day modal$/, (context) => {
+    act(() => {
+      context.result.current.dismissStartOfDayModal();
+    });
+  });
+
+  runner.register(/^the start of day modal should not be active$/, (context) => {
+    expect(context.result.current.gameState.showStartOfDayModal).toBe(false);
+  });
+
+  runner.register(/^a Board is rendered with 2 cards in a column$/, (context) => {
+    context.mockCards = [
+      { id: 'card1', title: 'Card 1', description: 'desc', type: 'standard', columnId: 'development', effort: { analysis: 0, development: 2, testing: 0 }, remainingEffort: { analysis: 0, development: 2, testing: 0 }, assignedAvatars: [], isBlocked: false, failedQACount: 0, createdAt: 1, completedAt: null, history: [] },
+      { id: 'card2', title: 'Card 2', description: 'desc', type: 'standard', columnId: 'development', effort: { analysis: 0, development: 2, testing: 0 }, remainingEffort: { analysis: 0, development: 2, testing: 0 }, assignedAvatars: [], isBlocked: false, failedQACount: 0, createdAt: 1, completedAt: null, history: [] }
+    ];
+    context.mockAvatars = [
+      { id: 'alice', name: 'Alice', color: '#ff0000', currentRoll: 4, assignedCardId: null, previousCardId: null, spentCapacity: 0, remainingCapacity: 4, workedOnCardIdsToday: [] }
+    ];
+    context.mockColumns = [
+      { id: 'development', name: 'Development', wipLimit: null, allowedEffortTypes: ['development'] }
+    ];
+  });
+
+  runner.register(/^the user clicks allocate on the first card$/, (context) => {
+    const { container } = render(
+      React.createElement(CardComponent, {
+        card: context.mockCards[0],
+        avatars: context.mockAvatars,
+        columns: context.mockColumns,
+        pairingAllowed: false,
+        onAllocateCapacity: () => {},
+        onMoveCard: () => ({ success: true, errorMessage: '' }),
+        gamePhase: 'dice_rolled',
+        isFirst: true,
+        isLast: false
+      })
+    );
+    const allocateBtn = within(container).getByText('Allocate');
+    fireEvent.click(allocateBtn);
+    context.firstCardContainer = container;
+  });
+
+  runner.register(/^the dropdown menu should open downwards$/, (context) => {
+    const dropdown = context.firstCardContainer.querySelector('.avatar-dropdown');
+    expect(dropdown).toBeDefined();
+    expect(dropdown.style.top).toBe('100%');
+    expect(dropdown.style.bottom).toBe('');
+  });
+
+  runner.register(/^the user clicks allocate on the second card$/, (context) => {
+    const { container } = render(
+      React.createElement(CardComponent, {
+        card: context.mockCards[1],
+        avatars: context.mockAvatars,
+        columns: context.mockColumns,
+        pairingAllowed: false,
+        onAllocateCapacity: () => {},
+        onMoveCard: () => ({ success: true, errorMessage: '' }),
+        gamePhase: 'dice_rolled',
+        isFirst: false,
+        isLast: true
+      })
+    );
+    const allocateBtn = within(container).getByText('Allocate');
+    fireEvent.click(allocateBtn);
+    context.secondCardContainer = container;
+  });
+
+  runner.register(/^the dropdown menu should open upwards$/, (context) => {
+    const dropdown = context.secondCardContainer.querySelector('.avatar-dropdown');
+    expect(dropdown).toBeDefined();
+    expect(dropdown.style.bottom).toBe('30px');
+    expect(dropdown.style.top).toBe('');
+  });
+
+  runner.register(/^a spy is set up on scrollIntoView$/, (context) => {
+    context.scrollIntoViewSpy = vi.fn();
+    window.Element.prototype.scrollIntoView = context.scrollIntoViewSpy;
+  });
+
+  runner.register(/^the user advances the day$/, (context) => {
+    act(() => {
+      context.result.current.startGame();
+    });
+    
+    // Render Controls with current gameState to trigger effect
+    const { rerender } = render(
+      React.createElement(Controls, {
+        gameState: context.result.current.gameState,
+        onRollDice: () => {},
+        onEndDay: () => {},
+        onStartNextDay: () => {},
+        onRestartGame: () => {},
+        onResetDailyWork: () => {},
+        isMultiplayer: false,
+        isAdmin: false
+      })
+    );
+    
+    act(() => {
+      context.result.current.rollDice();
+    });
+    
+    rerender(
+      React.createElement(Controls, {
+        gameState: context.result.current.gameState,
+        onRollDice: () => {},
+        onEndDay: () => {},
+        onStartNextDay: () => {},
+        onRestartGame: () => {},
+        onResetDailyWork: () => {},
+        isMultiplayer: false,
+        isAdmin: false
+      })
+    );
+    
+    act(() => {
+      context.result.current.endDay();
+    });
+    
+    rerender(
+      React.createElement(Controls, {
+        gameState: context.result.current.gameState,
+        onRollDice: () => {},
+        onEndDay: () => {},
+        onStartNextDay: () => {},
+        onRestartGame: () => {},
+        onResetDailyWork: () => {},
+        isMultiplayer: false,
+        isAdmin: false
+      })
+    );
+  });
+
+  runner.register(/^scrollIntoView should not have been called on the viewport$/, (context) => {
+    expect(context.scrollIntoViewSpy).not.toHaveBeenCalled();
   });
 };
 

@@ -15,6 +15,8 @@ interface CardComponentProps {
   onSplitEpic?: (epicId: string) => void;
   shiftLeftActive?: boolean;
   swarmingActive?: boolean;
+  isFirst?: boolean;
+  isLast?: boolean;
 }
 
 export const CardComponent: React.FC<CardComponentProps> = ({
@@ -29,7 +31,9 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   isAdmin = false,
   onSplitEpic,
   shiftLeftActive = false,
-  swarmingActive = false
+  swarmingActive = false,
+  isFirst = false,
+  isLast = false
 }) => {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [selectedShiftLeftEffort, setSelectedShiftLeftEffort] = useState<'development' | 'testing'>('development');
@@ -447,7 +451,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                 {showAddMenu && (
                   <div className="avatar-dropdown" style={{
                     position: 'absolute',
-                    bottom: '30px',
+                    ...(isFirst ? { top: '100%', marginTop: '4px' } : { bottom: '30px' }),
                     left: '0',
                     backgroundColor: 'hsl(223, 47%, 11%)',
                     border: '1px solid var(--border-glass-focused)',

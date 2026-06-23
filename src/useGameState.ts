@@ -160,6 +160,7 @@ export const useGameState = () => {
       shiftLeftActive: false,
       swarmingActive: false,
       smallerBatchesActive: false,
+      showStartOfDayModal: true,
       config: {
         maxDays: 10,
         blockerChance: 0.15,
@@ -1068,6 +1069,7 @@ export const useGameState = () => {
         swarmingActive,
         smallerBatchesActive,
         lastSelectedScenarioId,
+        showStartOfDayModal: !isGameOver,
       };
     });
   }, []);
@@ -1365,6 +1367,13 @@ export const useGameState = () => {
     }));
   }, []);
 
+  const dismissStartOfDayModal = useCallback(() => {
+    setGameState(prev => ({
+      ...prev,
+      showStartOfDayModal: false
+    }));
+  }, []);
+
   return {
     gameState,
     startGame,
@@ -1380,6 +1389,7 @@ export const useGameState = () => {
     fastForwardToWeekEnd,
     injectCustomExpediteCards,
     splitEpic,
-    queueEvent
+    queueEvent,
+    dismissStartOfDayModal
   };
 };

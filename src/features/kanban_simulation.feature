@@ -112,3 +112,23 @@ Feature: Kanban Simulation Flow Accelerators and Scenarios
     When the card is moved forward to Development
     Then the move is blocked with an effort remaining warning
     And the card stays in Analysis
+
+  Scenario: Start of Day Modal display
+    Given a new game is started
+    Then the start of day modal should be active
+    And the modal should display the event title "Project Kickoff (Day 1)"
+    When the user dismisses the start of day modal
+    Then the start of day modal should not be active
+
+  Scenario: Card Dropdown Position avoids clipping
+    Given a Board is rendered with 2 cards in a column
+    When the user clicks allocate on the first card
+    Then the dropdown menu should open downwards
+    When the user clicks allocate on the second card
+    Then the dropdown menu should open upwards
+
+  Scenario: Scroll jump prevention on log updates
+    Given a spy is set up on scrollIntoView
+    When the user advances the day
+    Then scrollIntoView should not have been called on the viewport
+
