@@ -1,8 +1,18 @@
+/**
+ * FIREBASE INITIALIZER (Equivalent to establishing a database connection handle in Perl, e.g., DBI->connect)
+ * 
+ * In a traditional web app, this would be a server-side DB connection pool. Since we are running
+ * completely serverless on the client (GitHub Pages), this script initializes the Firebase SDK client-side
+ * singleton instance.
+ */
+
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
 
-// Firebase configuration using Vite environment variables with mock fallbacks for local sandbox testing
+// Connection credentials configuration (analogous to a DSN connection string in MSSQL/Perl DBI).
+// Built during the Vite compile phase using repository secrets injected from GHA secrets.
+// Includes default fallback values for local sandbox testing when env variables are not present.
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "mock-api-key-for-local-testing",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "antigravity-kanban-game.firebaseapp.com",
@@ -12,8 +22,11 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID || "1:123456789012:web:abcdef1234567890"
 };
 
+// Initialize the root Firebase app instance (analogous to a database connection manager)
 const app = initializeApp(firebaseConfig);
 
+// Export singletons for Authentication and Firestore Database.
+// Think of 'db' as our database handle ($dbh in Perl DBI) used to execute queries and transactions.
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 

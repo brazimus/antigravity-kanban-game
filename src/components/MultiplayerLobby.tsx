@@ -22,25 +22,31 @@ const AVATAR_COLORS = [
   { name: 'Teal', hex: '#06b6d4' }
 ];
 
+/**
+ * MULTIPLAYER LOBBY COMPONENT
+ * 
+ * Provides the visual routing gateway for both students (anonymous players) and instructors (authenticated admins).
+ * Think of this as the main form-handling script that maps user inputs to Firestore collection schemas
+ * and handles user sessions.
+ */
 export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   onJoinAsPlayer,
   onJoinAsAdmin
 }) => {
+  // Toggle states (analogous to boolean flags in Perl script config)
   const [isAdminMode, setIsAdminMode] = useState(false);
   const [isAdminRegister, setIsAdminRegister] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Player fields
+  // Player Form Fields (analogous to query parameter bindings from a CGI form)
   const [playerRoomCode, setPlayerRoomCode] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [playerColor, setPlayerColor] = useState(AVATAR_COLORS[0].hex);
 
-  // Admin credentials
+  // Admin Credentials & Whitelist Variables (equivalent to user table fields and lists)
   const [adminEmail, setAdminEmail] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
-  
-  // Admin room creation
   const [adminRoomCode, setAdminRoomCode] = useState('');
   const [selectedScenario, setSelectedScenario] = useState('easy_mode');
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);

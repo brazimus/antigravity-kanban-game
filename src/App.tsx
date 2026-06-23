@@ -11,16 +11,24 @@ import {
 import './App.css';
 
 function App() {
+  // Global App State Variables (analogous to global package variables in Perl)
   const [mode, setMode] = useState<'single' | 'multi'>('single');
   const [roomCode, setRoomCode] = useState<string | null>(null);
   const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
   const [playerName, setPlayerName] = useState<string>('');
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
 
+  // Instantiating the two state engines.
+  // singleEngine: runs purely in-memory (local state hashes) for offline single-player.
+  // multiEngine: sets up reactive Firestore listeners and transactional mutations for cloud sync.
   const singleEngine = useGameState();
   const multiEngine = useMultiplayerState(roomCode, currentPlayerId, isAdmin);
 
   const isMulti = mode === 'multi' && roomCode !== null;
+
+  // Active Engine Dispatcher:
+  // Dynamically assigns the active controller engine based on the multiplayer toggle switch.
+  // Think of this as dynamic dispatching of a method call to either local or DB backend packages.
   const activeEngine = isMulti 
     ? { ...multiEngine, startGame: () => multiEngine.createRoom('easy_mode') } 
     : singleEngine;

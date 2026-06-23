@@ -154,7 +154,18 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     await batch.commit();
   }, [roomCode]);
 
-  // Initialize and Sync Room State from Firestore
+  /**
+   * REAL-TIME SYNCHRONIZATION EVENT LOOPS (Analogous to continuous database cursors)
+   * 
+   * This hook sets up real-time event listener handles (onSnapshot) connecting to the Firebase
+   * reactive document store. Think of this as opening three active continuous database cursors 
+   * that automatically stream changes into the client-side state hash ($gameState in React) 
+   * whenever a transaction commits on the remote server.
+   * 
+   * To prevent socket leaks and resource exhaustion (vital to stay in the free Spark Tier),
+   * this hook returns a cleanup callback that closes all listener handles when this component
+   * is unmounted (equivalent to closing open file descriptors or cursor handles).
+   */
   useEffect(() => {
     if (!roomCode) {
       setLoading(false);
@@ -271,7 +282,24 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     }
   }, [roomCode, currentPlayerId]);
 
-  // Allocate Capacity (Player Only - Atomic Transaction)
+  /**
+   * ATOMIC TRANSACTION BLOCK: Allocate Capacity (ACID Serializable transaction isolation)
+   * 
+   * Analogous to:
+   *   BEGIN TRANSACTION
+   *     SELECT remainingCapacity FROM players WHERE id = ... HOLDLOCK;
+   *     SELECT remainingEffort FROM cards WHERE id = ... HOLDLOCK;
+   *     -- Perform calculations in memory
+   *     UPDATE players SET ...
+   *     UPDATE cards SET ...
+   *   COMMIT
+   * 
+   * Why a transaction? In a multi-user environment, two students might try to allocate capacity to the
+   * same card simultaneously. If we used standard asynchronous updates, we could get race conditions.
+   * Firestore transactions enforce optimistic concurrency controls (OCC): it reads both documents, 
+   * calculates the delta, and commits writes ONLY if the documents were not modified in the meantime.
+   * If a concurrent modification occurs, the transaction automatically rolls back and retries.
+   */
   const allocateCapacity = useCallback(async (avatarId: string, cardId: string) => {
     if (!roomCode || !currentPlayerId) return;
     if (avatarId !== currentPlayerId) return; // Can only spend own capacity!

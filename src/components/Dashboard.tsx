@@ -31,11 +31,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
     totalCardsCompleted: number;
   } | null>(null);
 
+  /**
+   * DATABASE AGGREGATION & ANALYTICS FETCH (Equivalent to SQL GROUP BY / AVG queries)
+   * 
+   * Since Firestore is a document-oriented NoSQL database, we cannot perform native server-side 
+   * complex group-by or average calculations (unlike MSSQL's: SELECT AVG(cycle_time) FROM games GROUP BY week).
+   * 
+   * Instead, we run a query to fetch all completed game documents and aggregate the numbers 
+   * client-side using map-reduce operations. We partition daily log arrays into weeks and calculate 
+   * arithmetic means ($avgW1, $avgW2) using array accumulation.
+   */
   useEffect(() => {
     if (!isMultiplayer || !showAggregate) return;
 
     const fetchAggregateStats = async () => {
       try {
+        // Query to find completed sessions: SELECT * FROM games WHERE status = 'completed'
         const q = query(collection(db, 'games'), where('status', '==', 'completed'));
         const querySnapshot = await getDocs(q);
         

@@ -29,10 +29,10 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   const currentColumn = columns.find(col => col.id === card.columnId);
   const activeEffortTypes = currentColumn?.allowedEffortTypes || [];
 
-  // Find which avatars are assigned to this card today
+  // Find which avatars are assigned to this card today (analogous to doing a grep check on a Perl array of hashes: grep { exists $card_avatars{$_->{id}} } @avatars)
   const assignedAvatars = avatars.filter(a => card.assignedAvatars.includes(a.id));
   
-  // Find devs who still have capacity to work
+  // Find devs who still have capacity to work (analogous to a filtered grep block)
   const availableDevs = avatars.filter(a => {
     // If in multiplayer player mode, a student can only assign themselves!
     if (currentPlayerId && !isAdmin && a.id !== currentPlayerId) return false;
