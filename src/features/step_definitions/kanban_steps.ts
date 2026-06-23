@@ -4,6 +4,7 @@ import React from 'react';
 import { CardComponent } from '../../components/CardComponent';
 import { Controls } from '../../components/Controls';
 import { BddRunner } from '../bdd_runner';
+import { easyModeScenario } from '../../scenarios';
 
 export const registerSteps = (runner: BddRunner) => {
   runner.register(/^a new game is started$/, (context) => {
@@ -971,5 +972,82 @@ export const registerSteps = (runner: BddRunner) => {
     expect(newCard.effort.analysis).toBe(1);
     expect(newCard.effort.development).toBe(2);
     expect(newCard.effort.testing).toBe(1);
+  });
+
+  runner.register(/^every day event in the scenario calendar is verified to execute its side effects$/, (context) => {
+    const scenario = easyModeScenario;
+    const totalDays = scenario.totalDays;
+
+    const verifyDayEffects = (day: number) => {
+      const event = scenario.events[day];
+      if (!event) return;
+
+      const state = context.result.current.gameState;
+
+      // 1. Verify title and description
+      expect(state.currentDayEvent).toBeDefined();
+      expect(state.currentDayEvent?.title).toBe(event.title);
+
+      // 2. Verify new cards
+      if (event.newCards) {
+        event.newCards.forEach((nc: any) => {
+          const found = state.cards.some(
+            (c: any) => c.title === nc.title && c.columnId === nc.columnId && c.type === nc.type
+          );
+          expect(found).toBe(true);
+        });
+      }
+
+      // 3. Verify WIP limits
+      if (event.wipLimits) {
+        Object.entries(event.wipLimits).forEach(([colId, expectedLimit]) => {
+          const col = state.columns.find((col: any) => col.id === colId);
+          expect(col).toBeDefined();
+          expect(col.wipLimit).toBe(expectedLimit);
+        });
+      }
+
+      // 4. Verify pairingAllowed
+      if (event.pairingAllowed !== undefined) {
+        expect(state.pairingAllowed).toBe(event.pairingAllowed);
+      }
+
+      // 5. Verify blockers
+      if (event.blockCardId) {
+        const blockedCards = state.cards.filter((c: any) => c.isBlocked);
+        expect(blockedCards.length).toBeGreaterThan(0);
+      }
+    };
+
+    // Day 1
+    verifyDayEffects(1);
+
+    // Advance days 2 to 10
+    for (let day = 2; day <= totalDays; day++) {
+      // Before advancing to Day 5, move a card to development so there is a blocker target
+      if (day === 5) {
+        const card = context.result.current.gameState.cards.find((c: any) => c.columnId === 'analysis');
+        if (card) {
+          act(() => {
+            card.remainingEffort.analysis = 0;
+          });
+          act(() => {
+            context.result.current.moveCard(card.id, 'development');
+          });
+        }
+      }
+
+      act(() => {
+        context.result.current.rollDice();
+      });
+      act(() => {
+        context.result.current.endDay();
+      });
+      act(() => {
+        context.result.current.startNextDay();
+      });
+
+      verifyDayEffects(day);
+    }
   });
 };

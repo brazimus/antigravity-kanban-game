@@ -811,8 +811,87 @@ export const useGameState = () => {
         updatedColumns = updatedColumns.map(col => ({ ...col, wipLimit: null }));
       }
 
+      // Process dayEvent WIP limits and pairing constraints if present (e.g. Day 6 calendar event)
+      if (dayEvent) {
+        if (dayEvent.wipLimits) {
+          updatedColumns = updatedColumns.map(col => {
+            if (dayEvent.wipLimits && col.id in dayEvent.wipLimits) {
+              return { ...col, wipLimit: dayEvent.wipLimits[col.id] };
+            }
+            return col;
+          });
+          const hasLimits = Object.values(dayEvent.wipLimits).some(val => val !== null);
+          if (hasLimits) {
+            wipLimitsActive = true;
+          }
+        }
+        if (dayEvent.pairingAllowed !== undefined) {
+          pairingAllowed = dayEvent.pairingAllowed;
+        }
+      }
+
       // Handle OS upgrade/Tradeshow events and carry-overs
       let nextEvent = dayEvent;
+
+      // Handle card injection and blockers from dayEvent (e.g. Day 5 and Day 8 calendar events)
+      if (dayEvent) {
+        if (dayEvent.newCards) {
+          const addedCards: Card[] = dayEvent.newCards.map((c, index) => ({
+            ...c,
+            id: `card_${generateId()}_d${nextDay}_${index}`,
+            remainingEffort: { ...c.effort },
+            assignedAvatars: [],
+            isBlocked: false,
+            failedQACount: 0,
+            createdAt: nextDay,
+            completedAt: null,
+            startedAt: c.columnId !== 'backlog' && c.columnId !== 'ready' ? nextDay : null,
+            history: [{ day: nextDay, columnId: c.columnId }],
+          }));
+          updatedCards = [...updatedCards, ...addedCards];
+          addedCards.forEach(c => {
+            logs.push(`[System] New card added: "${c.title}" in column ${c.columnId.toUpperCase()}.`);
+          });
+        }
+
+        if (dayEvent.blockCardId) {
+          if (dayEvent.blockCardId === 'random_dev_card') {
+            const devCards = updatedCards.filter(c => c.columnId === 'development' && !c.isBlocked);
+            if (devCards.length > 0) {
+              const randCard = devCards[Math.floor(Math.random() * devCards.length)];
+              updatedCards = updatedCards.map(c => {
+                if (c.id === randCard.id) {
+                  return { ...c, isBlocked: true, blockerReason: dayEvent.blockedReason || 'Blocked.' };
+                }
+                return c;
+              });
+              logs.push(`[Alert] Blocker applied to "${randCard.title}": ${dayEvent.blockedReason}`);
+            } else {
+              const inProgressCards = updatedCards.filter(c => (c.columnId === 'analysis' || c.columnId === 'development' || c.columnId === 'testing') && !c.isBlocked);
+              if (inProgressCards.length > 0) {
+                const randCard = inProgressCards[Math.floor(Math.random() * inProgressCards.length)];
+                updatedCards = updatedCards.map(c => {
+                  if (c.id === randCard.id) {
+                    return { ...c, isBlocked: true, blockerReason: dayEvent.blockedReason || 'Blocked.' };
+                  }
+                  return c;
+                });
+                logs.push(`[Alert] Blocker applied to "${randCard.title}": ${dayEvent.blockedReason}`);
+              } else {
+                logs.push(`[System] Blocker event active, but no active cards available to block.`);
+              }
+            }
+          } else {
+            updatedCards = updatedCards.map(c => {
+              if (c.id === dayEvent.blockCardId) {
+                return { ...c, isBlocked: true, blockerReason: dayEvent.blockedReason || 'Blocked.' };
+              }
+              return c;
+            });
+            logs.push(`[Alert] Card "${dayEvent.blockCardId}" has been blocked.`);
+          }
+        }
+      }
       if (nextEvent) {
         if (nextEvent.title.includes('OS Upgrade')) {
           // Keep OS Upgrade as is

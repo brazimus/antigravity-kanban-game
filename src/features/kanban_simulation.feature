@@ -200,3 +200,7 @@ Feature: Kanban Simulation Flow Accelerators and Scenarios
     And Smaller Batches accelerator is active
     When the backlog is replenished with a new card with Math.random returning 0.5
     Then the new card's effort values should be halved
+
+  Scenario: All Scenario Calendar Events are fully executed
+    Given a new game is started
+    Then every day event in the scenario calendar is verified to execute its side effects
