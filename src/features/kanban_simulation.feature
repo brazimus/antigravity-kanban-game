@@ -62,3 +62,14 @@ Feature: Kanban Simulation Flow Accelerators and Scenarios
     When the weekend summary is viewed
     Then the "smaller_batches" option is highlighted as a recommended flow fix
 
+  Scenario: End-to-End Choose Your Own Adventure Pathway
+    Given a new game is started with max days of 15
+    When Week 1 completes and reaches weekend summary
+
+    And the user selects the "tradeshow" scenario
+    And Week 2 is launched
+    Then a monolithic Epic is created in the Ready column
+    When Week 2 completes and reaches weekend summary
+    Then the "smaller_batches" option is highlighted as a recommended flow fix
+
+

@@ -295,5 +295,42 @@ export const registerSteps = (runner: BddRunner) => {
     const recommended = recommendations[lastId!];
     expect(recommended).toBe(expectedRecId);
   });
+
+  runner.register(/^the user selects the "(.*)" scenario$/, (context, scenarioId) => {
+    act(() => {
+      context.selectedCYOAScenario = scenarioId;
+    });
+  });
+
+  runner.register(/^Week 2 is launched$/, (context) => {
+    act(() => {
+      context.result.current.startNextDay(context.selectedCYOAScenario);
+    });
+  });
+
+  runner.register(/^a monolithic Epic is created in the Ready column$/, (context) => {
+    const epic = context.result.current.gameState.cards.find((c: any) => c.type === 'epic' && c.columnId === 'ready');
+    expect(epic).toBeDefined();
+    expect(epic.effort.development).toBe(12);
+  });
+
+  runner.register(/^Week 2 completes and reaches weekend summary$/, (context) => {
+    for (let d = 6; d < 10; d++) {
+      act(() => { context.result.current.rollDice(); });
+      act(() => { context.result.current.endDay(); });
+      act(() => { context.result.current.startNextDay(); });
+    }
+    act(() => { context.result.current.rollDice(); });
+    act(() => { context.result.current.endDay(); });
+    expect(context.result.current.gameState.gamePhase).toBe('week_summary');
+  });
+
+  runner.register(/^a new game is started with max days of (\d+)$/, (context, maxDays) => {
+    act(() => {
+      context.result.current.startGame({ maxDays: parseInt(maxDays, 10) });
+    });
+  });
 };
+
+
 

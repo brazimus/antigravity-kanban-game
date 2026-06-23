@@ -140,7 +140,7 @@ export const useGameState = () => {
 
     setGameState({
       day: 1,
-      maxDays: scenario.totalDays,
+      maxDays: customConfig?.maxDays ?? scenario.totalDays,
       cards: initialCards,
       columns: defaultColumns.map(col => {
         if (initialEvent.wipLimits && col.id in initialEvent.wipLimits) {
