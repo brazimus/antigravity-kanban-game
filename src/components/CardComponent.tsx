@@ -270,14 +270,16 @@ export const CardComponent: React.FC<CardComponentProps> = ({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
                     border: (hasSwitch || hasSwitchFromYesterday) ? '2px dashed var(--accent-amber)' : '2px solid transparent',
                     boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
-                    position: 'relative'
+                    position: 'relative',
+                    padding: '3px'
                   }}
                 >
-                  {avatar.name[0]}
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: '100%', height: '100%' }}>
+                    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
                   {(hasSwitch || hasSwitchFromYesterday) && (
                     <div style={{
                       position: 'absolute',

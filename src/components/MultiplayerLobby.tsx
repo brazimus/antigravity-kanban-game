@@ -4,9 +4,9 @@ import {
   createUserWithEmailAndPassword, 
   signInAnonymously 
 } from 'firebase/auth';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import { Shield, User, Play, LogIn, UserPlus } from 'lucide-react';
+import { Shield, User, Play, LogIn, UserPlus, Plus, Trash2 } from 'lucide-react';
 
 interface MultiplayerLobbyProps {
   onJoinAsPlayer: (roomCode: string, name: string, color: string, playerId: string) => void;
@@ -45,6 +45,9 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   const [selectedScenario, setSelectedScenario] = useState('easy_mode');
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [adminUid, setAdminUid] = useState<string | null>(null);
+  const [whitelist, setWhitelist] = useState<string[]>([]);
+  const [newWhitelistEmail, setNewWhitelistEmail] = useState('');
+  const [whitelistError, setWhitelistError] = useState<string | null>(null);
 
   // Generate a random 6-character suggested room code
   const suggestRoomCode = () => {
@@ -125,9 +128,25 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
     setLoading(true);
     setError(null);
 
+    const cleanEmail = adminEmail.trim().toLowerCase();
+
     try {
       let userCredential;
       if (isAdminRegister) {
+        // Auto-seed braz@braz.me
+        if (cleanEmail === 'braz@braz.me') {
+          const whitelistRef = doc(db, 'approved_instructors', 'braz@braz.me');
+          await setDoc(whitelistRef, { addedAt: Date.now(), addedBy: 'system_default' });
+        } else {
+          // Check whitelist
+          const docRef = doc(db, 'approved_instructors', cleanEmail);
+          const docSnap = await getDoc(docRef);
+          if (!docSnap.exists()) {
+            setError('Your email is not on the approved instructor list. Please request access from the system administrator.');
+            setLoading(false);
+            return;
+          }
+        }
         userCredential = await createUserWithEmailAndPassword(auth, adminEmail, adminPassword);
       } else {
         userCredential = await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
@@ -140,6 +159,79 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
       setError(err.message || 'Authentication failed.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Real-time synchronization of Approved Instructors Whitelist
+  React.useEffect(() => {
+    if (!adminLoggedIn) return;
+
+    const colRef = collection(db, 'approved_instructors');
+    const unsubscribe = onSnapshot(colRef, (snapshot) => {
+      const emails: string[] = [];
+      snapshot.forEach((doc) => {
+        emails.push(doc.id);
+      });
+      setWhitelist(emails.sort());
+    }, (err) => {
+      console.error("Failed to load approved instructors list:", err);
+    });
+
+    return () => unsubscribe();
+  }, [adminLoggedIn]);
+
+  // Add new email to approved instructors whitelist
+  const handleAddWhitelist = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setWhitelistError(null);
+    const emailToVerify = newWhitelistEmail.trim().toLowerCase();
+    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailToVerify)) {
+      setWhitelistError('Please enter a valid email address.');
+      return;
+    }
+
+    if (whitelist.includes(emailToVerify)) {
+      setWhitelistError('Email is already whitelisted.');
+      return;
+    }
+
+    try {
+      const docRef = doc(db, 'approved_instructors', emailToVerify);
+      await setDoc(docRef, {
+        addedAt: Date.now(),
+        addedBy: auth.currentUser?.email || 'admin'
+      });
+      setNewWhitelistEmail('');
+    } catch (err: any) {
+      console.error(err);
+      setWhitelistError(err.message || 'Failed to add email to whitelist.');
+    }
+  };
+
+  // Remove email from approved instructors whitelist
+  const handleRemoveWhitelist = async (emailToRemove: string) => {
+    const currentUserEmail = auth.currentUser?.email?.toLowerCase();
+    if (emailToRemove === currentUserEmail) {
+      alert("You cannot remove your own email from the whitelist!");
+      return;
+    }
+    if (emailToRemove === 'braz@braz.me') {
+      alert("You cannot remove the default system administrator email (braz@braz.me)!");
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to remove ${emailToRemove} from the approved instructors list?`)) {
+      return;
+    }
+
+    try {
+      const docRef = doc(db, 'approved_instructors', emailToRemove);
+      await deleteDoc(docRef);
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || 'Failed to remove email.');
     }
   };
 
@@ -356,23 +448,34 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                 <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '8px', fontWeight: 600 }}>
                   AVATAR COLOR
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '10px' }}>
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
                   {AVATAR_COLORS.map(c => (
                     <button
                       key={c.hex}
                       type="button"
                       onClick={() => setPlayerColor(c.hex)}
                       style={{
-                        height: '32px',
+                        width: '36px',
+                        height: '36px',
                         borderRadius: '50%',
                         backgroundColor: c.hex,
-                        border: playerColor === c.hex ? '3px solid #fff' : '2px solid transparent',
+                        color: '#fff',
+                        border: playerColor === c.hex ? '3px solid #fff' : '2px solid rgba(255,255,255,0.1)',
                         cursor: 'pointer',
-                        boxShadow: playerColor === c.hex ? '0 0 10px rgba(255,255,255,0.4)' : 'none',
-                        transition: 'all 0.2s ease'
+                        boxShadow: playerColor === c.hex ? '0 0 12px ' + c.hex : 'none',
+                        transition: 'all 0.2s ease',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        padding: '6px'
                       }}
                       title={c.name}
-                    />
+                    >
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ width: '100%', height: '100%' }}>
+                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+                        <circle cx="12" cy="7" r="4" />
+                      </svg>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -599,6 +702,91 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                       </button>
                     </div>
                   </form>
+
+                  {/* Whitelist Manager Section */}
+                  <div style={{ borderTop: '1px solid var(--border-glass)', paddingTop: '20px', marginTop: '10px' }}>
+                    <h4 style={{ fontSize: '0.85rem', textTransform: 'uppercase', color: 'var(--text-secondary)', marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '5px', fontWeight: 700 }}>
+                      <Shield size={14} /> Approved Instructors Whitelist
+                    </h4>
+                    
+                    <form onSubmit={handleAddWhitelist} style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
+                      <input 
+                        type="text"
+                        placeholder="new-instructor@school.edu"
+                        value={newWhitelistEmail}
+                        onChange={(e) => setNewWhitelistEmail(e.target.value)}
+                        style={{
+                          flex: 1,
+                          padding: '8px 10px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'rgba(0,0,0,0.3)',
+                          border: '1px solid var(--border-glass)',
+                          color: '#fff',
+                          fontSize: '0.8rem'
+                        }}
+                      />
+                      <button 
+                        type="submit" 
+                        className="btn btn-primary"
+                        style={{ padding: '8px 12px', fontSize: '0.8rem', display: 'flex', alignItems: 'center', gap: '4px' }}
+                      >
+                        <Plus size={12} /> Add
+                      </button>
+                    </form>
+
+                    {whitelistError && (
+                      <p style={{ color: 'var(--accent-red)', fontSize: '0.7rem', marginTop: '-8px', marginBottom: '10px' }}>
+                        {whitelistError}
+                      </p>
+                    )}
+
+                    <div style={{ 
+                      maxHeight: '120px', 
+                      overflowY: 'auto', 
+                      backgroundColor: 'rgba(0,0,0,0.15)', 
+                      borderRadius: 'var(--radius-sm)', 
+                      border: '1px solid var(--border-glass)',
+                      padding: '5px 10px'
+                    }}>
+                      {whitelist.length === 0 ? (
+                        <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textAlign: 'center', margin: '10px 0' }}>
+                          No approved instructors.
+                        </p>
+                      ) : (
+                        whitelist.map(email => (
+                          <div 
+                            key={email} 
+                            style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center', 
+                              padding: '6px 0', 
+                              borderBottom: '1px solid rgba(255,255,255,0.03)',
+                              fontSize: '0.75rem'
+                            }}
+                          >
+                            <span style={{ color: '#fff', fontFamily: 'monospace' }}>{email}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveWhitelist(email)}
+                              style={{ 
+                                background: 'none', 
+                                border: 'none', 
+                                color: 'var(--accent-red)', 
+                                cursor: 'pointer',
+                                padding: '2px',
+                                display: 'flex',
+                                alignItems: 'center'
+                              }}
+                              title="Remove access"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
 
                   <button
                     onClick={() => { setAdminLoggedIn(false); setAdminUid(null); }}
