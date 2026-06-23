@@ -11,9 +11,11 @@
 *   **BDD-First & Test-First Implementation**: All development work must start with defining Gherkin scenarios in a `.feature` file and implementing step definition tests first before writing features or modifying core components.
 *   **Business Stakeholder Translation**: Treat the Product Owner as a business stakeholder. Help translate conceptual goals into testable Given-When-Then Gherkin BDD scenarios.
 *   **Verify Red Phase**: Run the tests to confirm they fail (red phase) before writing the code to make them pass (green phase).
+*   **Zero Manual Verification in Plans**: Coding agents must always create BDD test scenarios for new features in implementation plans instead of suggesting manual verification, unless there is a critical, data-destructive reason that prevents automated testing.
 *   **100% Core Coverage Target**: Maintain test coverage targeting 100% (with a hard floor of 95%) for all core state engines (`src/useGameState.ts`, `src/useMultiplayerState.ts`, helper methods).
 *   **Zero-Defects & Warnings**: Handover is blocked if there are compile errors, TypeScript warnings, or failing tests.
 *   **Human-in-the-Loop Intervention**: If an implementation requires falling below the 95% coverage threshold or leaving warnings/lint errors unresolved, the coding agent **must** pause and request explicit approval from the Product Owner.
+
 
 ## Free-Tier & Platform Design Constraints
 *   **Spark Tier Conservation**: Keep database writes and reads to a minimum to fit within the Firebase Spark free tier (50,000 reads and 20,000 writes/day). Avoid polling; use real-time listeners (`onSnapshot`) and ensure they are cleaned up on component unmount.
