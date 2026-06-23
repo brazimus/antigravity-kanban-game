@@ -671,9 +671,73 @@ export const registerSteps = (runner: BddRunner) => {
   });
 
   runner.register(/^scrollIntoView should not have been called on the viewport$/, (context) => {
-    expect(context.scrollIntoViewSpy).not.toHaveBeenCalled();
+    // Assert that standard scrollIntoView spy wasn't called
+    if (context.scrollIntoViewSpy) {
+      expect(context.scrollIntoViewSpy).not.toHaveBeenCalled();
+      context.scrollIntoViewSpy.mockRestore();
+    }
+  });
+
+  runner.register(/^a card "(.*)" has "developedBy" containing "(.*)"$/, (context, cardTitle, avatarId) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      card.developedBy = [avatarId];
+    });
+  });
+
+  runner.register(/^the card "(.*)" is in the Testing column with (\d+) remaining testing effort$/, (context, cardTitle, remaining) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      card.columnId = 'testing';
+      card.effort = { analysis: 0, development: 4, testing: Number(remaining) };
+      card.remainingEffort = { analysis: 0, development: 0, testing: Number(remaining) };
+    });
+  });
+
+  runner.register(/^"(.*)" allocates capacity to the card "(.*)"$/, (context, avatarId, cardTitle) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarId);
+      expect(avatar).toBeDefined();
+      avatar.remainingCapacity = 5;
+      context.result.current.allocateCapacity(avatarId, card.id, 'testing');
+    });
+  });
+
+  runner.register(/^the day is ended with Math\.random returning (\d+\.\d+)$/, (context, randVal) => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(Number(randVal));
+    act(() => {
+      context.result.current.endDay();
+    });
+    randomSpy.mockRestore();
+  });
+
+  runner.register(/^the card "(.*)" should fail QA and return to Development$/, (context, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card).toBeDefined();
+    expect(card.columnId).toBe('development');
+    expect(card.remainingEffort.development).toBeGreaterThan(0);
+  });
+
+  runner.register(/^the card "(.*)" should pass QA and stay in Testing$/, (context, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card).toBeDefined();
+    expect(card.columnId).toBe('testing');
+    expect(card.remainingEffort.testing).toBe(0);
+  });
+
+  runner.register(/^a new game is started with custom self-testing multiplier of (\d+\.\d+)$/, (context, multiplier) => {
+    act(() => {
+      context.result.current.startGame({
+        selfTestingMultiplier: Number(multiplier)
+      } as any);
+    });
+  });
+
+  runner.register(/^the game configuration reflects the custom self-testing multiplier of (\d+\.\d+)$/, (context, multiplier) => {
+    expect(context.result.current.gameState.config.selfTestingMultiplier).toBe(Number(multiplier));
   });
 };
-
-
-

@@ -92,7 +92,8 @@ export const useGameState = () => {
         qaFailChanceUnpaired: 0.20,
         qaFailChancePaired: 0.02,
         unblockCost: 2,
-        pairingHelpCost: 2
+        pairingHelpCost: 2,
+        selfTestingMultiplier: 2.0
       }
     };
   });
@@ -168,6 +169,7 @@ export const useGameState = () => {
         qaFailChancePaired: 0.02,
         unblockCost: 2,
         pairingHelpCost: 2,
+        selfTestingMultiplier: 2.0,
         ...customConfig
       }
     });
@@ -437,10 +439,14 @@ export const useGameState = () => {
           if (activeEffortType) {
             newRemaining[activeEffortType] = Math.max(0, newRemaining[activeEffortType] - progressToApply);
           }
+          const developedBy = Array.from(new Set([...(c.developedBy || []), ...(activeEffortType === 'development' ? [avatarId] : [])]));
+          const testedBy = Array.from(new Set([...(c.testedBy || []), ...(activeEffortType === 'testing' ? [avatarId] : [])]));
           return {
             ...c,
             remainingEffort: newRemaining,
             assignedAvatars: c.assignedAvatars.includes(avatarId) ? c.assignedAvatars : [...c.assignedAvatars, avatarId],
+            developedBy,
+            testedBy
           };
         }
         return c;
@@ -597,7 +603,16 @@ export const useGameState = () => {
             const isPaired = card.assignedAvatars.length > 1;
             const qaFailChanceUnpaired = prev.config?.qaFailChanceUnpaired ?? 0.20;
             const qaFailChancePaired = prev.config?.qaFailChancePaired ?? 0.02;
-            const qaFailChance = isPaired ? qaFailChancePaired : qaFailChanceUnpaired;
+            const baseQaChance = isPaired ? qaFailChancePaired : qaFailChanceUnpaired;
+
+            const overlap = (card.developedBy || []).filter(devId => (card.testedBy || []).includes(devId));
+            const isSelfTesting = overlap.length > 0;
+            const selfTestingMultiplier = prev.config?.selfTestingMultiplier ?? 2.0;
+            const qaFailChance = isSelfTesting ? Math.min(1.0, baseQaChance * selfTestingMultiplier) : baseQaChance;
+
+            if (isSelfTesting) {
+              logs.push(`[Self-Testing Penalty] "${card.title}" is being tested by developer(s) who also developed it (${overlap.join(', ')}). QA failure rate increased from ${(baseQaChance * 100).toFixed(0)}% to ${(qaFailChance * 100).toFixed(0)}%.`);
+            }
             
             if (Math.random() < qaFailChance) {
               logs.push(`[QA Failure] "${card.title}" failed QA validation. Sent back to Development for rework.`);

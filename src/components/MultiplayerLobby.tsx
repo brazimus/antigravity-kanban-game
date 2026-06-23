@@ -64,6 +64,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
   const [configQaPaired, setConfigQaPaired] = useState(2);           // percentage
   const [configUnblockCost, setConfigUnblockCost] = useState(2);
   const [configPairingCost, setConfigPairingCost] = useState(2);
+  const [configSelfTestingMultiplier, setConfigSelfTestingMultiplier] = useState(2.0);
   const [gamesList, setGamesList] = useState<any[]>([]);
 
   // Generate a random 6-character suggested room code
@@ -347,7 +348,8 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
         qaFailChanceUnpaired: Number(configQaUnpaired) / 100,
         qaFailChancePaired: Number(configQaPaired) / 100,
         unblockCost: Number(configUnblockCost),
-        pairingHelpCost: Number(configPairingCost)
+        pairingHelpCost: Number(configPairingCost),
+        selfTestingMultiplier: Number(configSelfTestingMultiplier)
       };
 
       onJoinAsAdmin(formattedCode, adminUid, true, selectedScenario, customConfig);
@@ -849,6 +851,29 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                                 max="100"
                                 value={configQaPaired}
                                 onChange={(e) => setConfigQaPaired(Math.max(0, Math.min(100, Number(e.target.value))))}
+                                style={{
+                                  width: '100%',
+                                  padding: '6px 10px',
+                                  borderRadius: 'var(--radius-sm)',
+                                  backgroundColor: 'rgba(0,0,0,0.3)',
+                                  border: '1px solid var(--border-glass)',
+                                  color: '#fff',
+                                  fontSize: '0.8rem'
+                                }}
+                              />
+                            </div>
+
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.65rem', color: 'var(--text-secondary)', marginBottom: '3px', fontWeight: 600 }}>
+                                SELF-TEST MULTIPLIER (e.g. 2.0)
+                              </label>
+                              <input
+                                type="number"
+                                step="0.1"
+                                min="1.0"
+                                max="10.0"
+                                value={configSelfTestingMultiplier}
+                                onChange={(e) => setConfigSelfTestingMultiplier(Math.max(1.0, Math.min(10.0, Number(e.target.value))))}
                                 style={{
                                   width: '100%',
                                   padding: '6px 10px',

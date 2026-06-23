@@ -22,6 +22,8 @@ export interface Card {
   completedAt: number | null; // Day index completed
   startedAt: number | null; // Day index pulled into active columns (Analysis/Dev/Test)
   failedQACount: number;
+  developedBy?: string[];
+  testedBy?: string[];
   history: {
     day: number;
     columnId: string;
@@ -95,6 +97,7 @@ export interface GameConfig {
   qaFailChancePaired: number;        // e.g. 0.02
   unblockCost: number;               // e.g. 2
   pairingHelpCost: number;           // e.g. 2
+  selfTestingMultiplier: number;     // e.g. 2.0
 }
 
 export interface GameState {

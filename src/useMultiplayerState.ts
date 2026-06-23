@@ -67,7 +67,8 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
       qaFailChanceUnpaired: 0.20,
       qaFailChancePaired: 0.02,
       unblockCost: 2,
-      pairingHelpCost: 2
+      pairingHelpCost: 2,
+      selfTestingMultiplier: 2.0
     };
 
     const gameDocRef = doc(db, 'games', roomCode);
@@ -478,21 +479,40 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         // Verify if card is now assigned to this avatar
         const newAssignedAvatars = Array.from(new Set([...card.assignedAvatars, currentPlayerId]));
 
-        // Check QA Failures if development completed (bypassed if Shift-Left is active)
+        const developedBy = Array.from(new Set([...(card.developedBy || []), ...(activeEffortType === 'development' ? [currentPlayerId] : [])]));
+        const testedBy = Array.from(new Set([...(card.testedBy || []), ...(activeEffortType === 'testing' ? [currentPlayerId] : [])]));
+
+        // Check QA Failures if testing completed (bypassed if Shift-Left is active)
         let qaLogs = '';
-        if (activeEffortType === 'development' && updatedRemainingEffort.development === 0) {
+        let targetColumnId = card.columnId;
+        let targetHistory = card.history || [];
+        let finalAssignedAvatars = newAssignedAvatars;
+
+        if (activeEffortType === 'testing' && updatedRemainingEffort.testing === 0) {
           if (game.shiftLeftActive) {
             // Built-in quality: QA rework completely bypassed
           } else {
             const qaFailChanceUnpaired = game.config?.qaFailChanceUnpaired ?? 0.20;
             const qaFailChancePaired = game.config?.qaFailChancePaired ?? 0.02;
             const isPaired = newAssignedAvatars.length > 1;
-            const qaChance = isPaired ? qaFailChancePaired : qaFailChanceUnpaired;
+            const baseChance = isPaired ? qaFailChancePaired : qaFailChanceUnpaired;
+
+            const overlap = developedBy.filter(devId => testedBy.includes(devId));
+            const isSelfTesting = overlap.length > 0;
+            const selfTestingMultiplier = game.config?.selfTestingMultiplier ?? 2.0;
+            const qaChance = isSelfTesting ? Math.min(1.0, baseChance * selfTestingMultiplier) : baseChance;
 
             if (Math.random() < qaChance) {
-              updatedRemainingEffort.development = card.effort.development; // Reset dev effort
+              updatedRemainingEffort.development = card.effort.development || 2; // Reset dev effort
+              updatedRemainingEffort.testing = card.effort.testing || 1; // Reset test effort
               card.failedQACount += 1;
+              targetColumnId = 'development';
+              targetHistory = [...(card.history || []), { day: game.day, columnId: 'development' }];
+              finalAssignedAvatars = []; // Reset assignments so they don't carry over
               qaLogs = ` [QA Failure] Card "${card.title}" failed QA tests and requires developer rework!`;
+              if (isSelfTesting) {
+                qaLogs += ` (Self-tested penalty applied: failure rate was ${(qaChance * 100).toFixed(0)}%)`;
+              }
             }
           }
         }
@@ -514,10 +534,14 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         });
 
         transaction.update(cardRef, {
+          columnId: targetColumnId,
+          history: targetHistory,
           remainingEffort: updatedRemainingEffort,
-          assignedAvatars: newAssignedAvatars,
+          assignedAvatars: finalAssignedAvatars,
           isBlocked: card.isBlocked,
-          failedQACount: card.failedQACount
+          failedQACount: card.failedQACount,
+          developedBy,
+          testedBy
         });
 
         // Add log entry

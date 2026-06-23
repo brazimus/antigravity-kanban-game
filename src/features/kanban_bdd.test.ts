@@ -156,6 +156,26 @@ const featureContent = `Feature: Kanban Simulation Flow Accelerators and Scenari
     Given a spy is set up on scrollIntoView
     When the user advances the day
     Then scrollIntoView should not have been called on the viewport
+
+  Scenario: Self-Testing Penalty Increases QA Failure Rate
+    Given a new game is started
+    And a card "User Login & Auth" has "developedBy" containing "alice"
+    And the card "User Login & Auth" is in the Testing column with 1 remaining testing effort
+    And "alice" allocates capacity to the card "User Login & Auth"
+    When the day is ended with Math.random returning 0.3
+    Then the card "User Login & Auth" should fail QA and return to Development
+
+  Scenario: Standard QA Failure Rate When Tested By Different Developer
+    Given a new game is started
+    And a card "Database Schema Setup" has "developedBy" containing "alice"
+    And the card "Database Schema Setup" is in the Testing column with 1 remaining testing effort
+    And "bob" allocates capacity to the card "Database Schema Setup"
+    When the day is ended with Math.random returning 0.3
+    Then the card "Database Schema Setup" should pass QA and stay in Testing
+
+  Scenario: Admin Customizes Self-Testing Multiplier
+    Given a new game is started with custom self-testing multiplier of 3.0
+    Then the game configuration reflects the custom self-testing multiplier of 3.0
 `;
 
 
