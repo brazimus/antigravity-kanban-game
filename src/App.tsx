@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import type { GameConfig } from './types';
 import './App.css';
+import logoImg from './assets/logo.png';
 
 function App() {
   // Global App State Variables (analogous to global package variables in Perl)
@@ -83,21 +84,16 @@ function App() {
       }}>
         {/* Title */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <div style={{
-            background: 'linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%)',
-            width: '32px',
-            height: '32px',
-            borderRadius: '8px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#fff',
-            fontWeight: 800,
-            fontSize: '1rem',
-            boxShadow: 'var(--shadow-neon-primary)'
-          }}>
-            AG
-          </div>
+          <img 
+            src="/favicon.png" 
+            alt="AG Logo" 
+            style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              boxShadow: 'var(--shadow-neon-primary)'
+            }} 
+          />
           <div>
             <h1 style={{ fontSize: '1.1rem', fontWeight: 800, fontFamily: 'var(--font-title)', display: 'flex', alignItems: 'center', gap: '5px' }}>
               Antigravity Kanban Game
@@ -267,6 +263,19 @@ function App() {
               borderRadius: 'var(--radius-lg)',
               backgroundColor: 'var(--bg-glass-card)'
             }}>
+              <img 
+                src={logoImg} 
+                alt="Antigravity Kanban Logo" 
+                style={{ 
+                  width: '150px', 
+                  height: '150px', 
+                  marginBottom: '25px', 
+                  borderRadius: 'var(--radius-md)', 
+                  boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.4)',
+                  border: '1px solid var(--border-glass)' 
+                }} 
+              />
+              <br />
               <span style={{
                 fontSize: '0.75rem',
                 fontWeight: 700,
