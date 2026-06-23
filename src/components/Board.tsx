@@ -9,9 +9,11 @@ interface BoardProps {
   avatars: Avatar[];
   pairingAllowed: boolean;
   onAllocateCapacity: (avatarId: string, cardId: string) => void;
-  onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string };
+  onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string } | Promise<{ success: boolean; errorMessage: string }>;
   gamePhase: string;
   onReplenishBacklog: () => void;
+  currentPlayerId?: string | null;
+  isAdmin?: boolean;
 }
 
 export const Board: React.FC<BoardProps> = ({
@@ -22,7 +24,9 @@ export const Board: React.FC<BoardProps> = ({
   onAllocateCapacity,
   onMoveCard,
   gamePhase,
-  onReplenishBacklog
+  onReplenishBacklog,
+  currentPlayerId = null,
+  isAdmin = false
 }) => {
   return (
     <div className="kanban-board-container" style={{
@@ -89,7 +93,7 @@ export const Board: React.FC<BoardProps> = ({
               </div>
               
               {/* Manual Backlog Replenishment button */}
-              {column.id === 'backlog' && gamePhase !== 'intro' && gamePhase !== 'game_over' && (
+              {column.id === 'backlog' && gamePhase !== 'intro' && gamePhase !== 'game_over' && (!currentPlayerId || isAdmin) && (
                 <button
                   onClick={onReplenishBacklog}
                   className="btn btn-secondary"
@@ -162,6 +166,8 @@ export const Board: React.FC<BoardProps> = ({
                     onAllocateCapacity={onAllocateCapacity}
                     onMoveCard={onMoveCard}
                     gamePhase={gamePhase}
+                    currentPlayerId={currentPlayerId}
+                    isAdmin={isAdmin}
                   />
                 ))
               )}

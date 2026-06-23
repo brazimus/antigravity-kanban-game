@@ -97,4 +97,5 @@ export interface GameState {
     cards: Card[];
     avatars: Avatar[];
   };
+  nextEventId?: string | null;
 }

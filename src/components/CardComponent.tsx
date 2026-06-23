@@ -8,8 +8,10 @@ interface CardComponentProps {
   columns: Column[];
   pairingAllowed: boolean;
   onAllocateCapacity: (avatarId: string, cardId: string) => void;
-  onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string };
+  onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string } | Promise<{ success: boolean; errorMessage: string }>;
   gamePhase: string;
+  currentPlayerId?: string | null;
+  isAdmin?: boolean;
 }
 
 export const CardComponent: React.FC<CardComponentProps> = ({
@@ -19,7 +21,9 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   pairingAllowed,
   onAllocateCapacity,
   onMoveCard,
-  gamePhase
+  gamePhase,
+  currentPlayerId = null,
+  isAdmin = false
 }) => {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const currentColumn = columns.find(col => col.id === card.columnId);
@@ -30,6 +34,9 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   
   // Find devs who still have capacity to work
   const availableDevs = avatars.filter(a => {
+    // If in multiplayer player mode, a student can only assign themselves!
+    if (currentPlayerId && !isAdmin && a.id !== currentPlayerId) return false;
+
     // Check if they have capacity remaining today
     if (a.remainingCapacity <= 0) return false;
 
@@ -72,8 +79,8 @@ export const CardComponent: React.FC<CardComponentProps> = ({
     setShowAddMenu(false);
   };
 
-  const handleMove = (targetColumnId: string) => {
-    const res = onMoveCard(card.id, targetColumnId);
+  const handleMove = async (targetColumnId: string) => {
+    const res = await onMoveCard(card.id, targetColumnId);
     if (!res.success) {
       alert(res.errorMessage);
     }
@@ -381,37 +388,39 @@ export const CardComponent: React.FC<CardComponentProps> = ({
           </div>
 
           {/* Movement Actions */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', marginTop: '4px' }}>
-            {prevColumnId && (
-              <button 
-                onClick={() => handleMove(prevColumnId)}
-                className="btn btn-secondary"
-                style={{ flex: 1, padding: '2px 4px', fontSize: '0.65rem', borderRadius: '3px' }}
-              >
-                ← Pull Back
-              </button>
-            )}
-            
-            {nextColumnId && (
-              <button 
-                onClick={() => handleMove(nextColumnId)}
-                className="btn"
-                style={{ 
-                  flex: 2, 
-                  padding: '2px 4px', 
-                  fontSize: '0.65rem', 
-                  borderRadius: '3px',
-                  backgroundColor: isEffortComplete ? 'var(--accent-green)' : 'rgba(255,255,255,0.05)',
-                  color: isEffortComplete ? '#fff' : 'var(--text-secondary)',
-                  border: isEffortComplete ? 'none' : '1px solid var(--border-glass)',
-                  fontWeight: isEffortComplete ? 700 : 500,
-                  boxShadow: isEffortComplete ? '0 0 10px var(--accent-green-glow)' : 'none'
-                }}
-              >
-                {isEffortComplete ? 'Ready to Pull →' : 'Progressing...'}
-              </button>
-            )}
-          </div>
+          {(!currentPlayerId || isAdmin) && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '4px', marginTop: '4px' }}>
+              {prevColumnId && (
+                <button 
+                  onClick={() => handleMove(prevColumnId)}
+                  className="btn btn-secondary"
+                  style={{ flex: 1, padding: '2px 4px', fontSize: '0.65rem', borderRadius: '3px' }}
+                >
+                  ← Pull Back
+                </button>
+              )}
+              
+              {nextColumnId && (
+                <button 
+                  onClick={() => handleMove(nextColumnId)}
+                  className="btn"
+                  style={{ 
+                    flex: 2, 
+                    padding: '2px 4px', 
+                    fontSize: '0.65rem', 
+                    borderRadius: '3px',
+                    backgroundColor: isEffortComplete ? 'var(--accent-green)' : 'rgba(255,255,255,0.05)',
+                    color: isEffortComplete ? '#fff' : 'var(--text-secondary)',
+                    border: isEffortComplete ? 'none' : '1px solid var(--border-glass)',
+                    fontWeight: isEffortComplete ? 700 : 500,
+                    boxShadow: isEffortComplete ? '0 0 10px var(--accent-green-glow)' : 'none'
+                  }}
+                >
+                  {isEffortComplete ? 'Ready to Pull →' : 'Progressing...'}
+                </button>
+              )}
+            </div>
+          )}
 
         </div>
       )}

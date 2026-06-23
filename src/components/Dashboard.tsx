@@ -1,18 +1,91 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import type { Card, DailyLog } from '../types';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   ScatterChart, Scatter, Cell, BarChart, Bar, Legend, ReferenceLine, Label
 } from 'recharts';
+import { collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface DashboardProps {
   logs: DailyLog[];
   completedCards: Card[];
   activeCards: Card[];
   currentDay: number;
+  isMultiplayer?: boolean;
+  isAdmin?: boolean;
 }
 
-export const Dashboard: React.FC<DashboardProps> = ({ logs, completedCards, activeCards, currentDay }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ 
+  logs, 
+  completedCards, 
+  activeCards, 
+  currentDay,
+  isMultiplayer = false
+}) => {
+  const [showAggregate, setShowAggregate] = useState(false);
+  const [aggregateData, setAggregateData] = useState<{
+    totalGames: number;
+    avgCycleTimeWeek1: number;
+    avgCycleTimeWeek2: number;
+    totalCardsCompleted: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!isMultiplayer || !showAggregate) return;
+
+    const fetchAggregateStats = async () => {
+      try {
+        const q = query(collection(db, 'games'), where('status', '==', 'completed'));
+        const querySnapshot = await getDocs(q);
+        
+        let gamesCount = 0;
+        let totalCards = 0;
+        let cycleTimesWeek1: number[] = [];
+        let cycleTimesWeek2: number[] = [];
+
+        querySnapshot.forEach(gameDoc => {
+          gamesCount += 1;
+          const game = gameDoc.data();
+          const dailyLogs = game.dailyLogs || [];
+          
+          // Split log entries by week
+          const week1Logs = dailyLogs.filter((l: any) => l.day <= 5);
+          const week2Logs = dailyLogs.filter((l: any) => l.day >= 6);
+
+          week1Logs.forEach((l: any) => {
+            if (l.averageCycleTime) cycleTimesWeek1.push(l.averageCycleTime);
+          });
+          week2Logs.forEach((l: any) => {
+            if (l.averageCycleTime) cycleTimesWeek2.push(l.averageCycleTime);
+          });
+
+          if (dailyLogs.length > 0) {
+            const lastLog = dailyLogs[dailyLogs.length - 1];
+            totalCards += lastLog.cumulativeThroughput || 0;
+          }
+        });
+
+        const avgW1 = cycleTimesWeek1.length > 0 
+          ? parseFloat((cycleTimesWeek1.reduce((a, b) => a + b, 0) / cycleTimesWeek1.length).toFixed(1)) 
+          : 0;
+        const avgW2 = cycleTimesWeek2.length > 0 
+          ? parseFloat((cycleTimesWeek2.reduce((a, b) => a + b, 0) / cycleTimesWeek2.length).toFixed(1)) 
+          : 0;
+
+        setAggregateData({
+          totalGames: gamesCount,
+          avgCycleTimeWeek1: avgW1,
+          avgCycleTimeWeek2: avgW2,
+          totalCardsCompleted: totalCards
+        });
+      } catch (err) {
+        console.error('Failed to fetch aggregate stats:', err);
+      }
+    };
+
+    fetchAggregateStats();
+  }, [isMultiplayer, showAggregate]);
   // 1. CFD Data Prep
   const cfdData = useMemo(() => {
     return logs.map(log => ({
@@ -111,7 +184,97 @@ export const Dashboard: React.FC<DashboardProps> = ({ logs, completedCards, acti
   return (
     <div className="metrics-dashboard" style={{ display: 'grid', gap: '20px', padding: '10px' }}>
       
-      {/* Top Level Summary Cards */}
+      {isMultiplayer && (
+        <div style={{ display: 'flex', gap: '10px', marginBottom: '10px' }}>
+          <button
+            onClick={() => setShowAggregate(false)}
+            className="btn"
+            style={{
+              padding: '6px 14px',
+              fontSize: '0.8rem',
+              backgroundColor: !showAggregate ? 'rgba(255,255,255,0.08)' : 'transparent',
+              color: !showAggregate ? '#fff' : 'var(--text-secondary)',
+              border: '1px solid var(--border-glass)'
+            }}
+          >
+            Current Session
+          </button>
+          <button
+            onClick={() => setShowAggregate(true)}
+            className="btn"
+            style={{
+              padding: '6px 14px',
+              fontSize: '0.8rem',
+              backgroundColor: showAggregate ? 'rgba(255,255,255,0.08)' : 'transparent',
+              color: showAggregate ? '#fff' : 'var(--text-secondary)',
+              border: '1px solid var(--border-glass)'
+            }}
+          >
+            All Classes Aggregate
+          </button>
+        </div>
+      )}
+
+      {showAggregate ? (
+        aggregateData && aggregateData.totalGames > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Aggregate Overview Cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
+              <div className="glass-panel" style={{ padding: '15px', textAlign: 'center' }}>
+                <h4 style={{ color: 'var(--text-secondary)', marginBottom: '5px', fontSize: '0.85rem', textTransform: 'uppercase' }}>Completed Sessions</h4>
+                <p style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--primary)' }}>{aggregateData.totalGames}</p>
+              </div>
+              <div className="glass-panel" style={{ padding: '15px', textAlign: 'center' }}>
+                <h4 style={{ color: 'var(--text-secondary)', marginBottom: '5px', fontSize: '0.85rem', textTransform: 'uppercase' }}>Avg Week 1 Cycle Time</h4>
+                <p style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-red)' }}>{aggregateData.avgCycleTimeWeek1} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>days</span></p>
+              </div>
+              <div className="glass-panel" style={{ padding: '15px', textAlign: 'center' }}>
+                <h4 style={{ color: 'var(--text-secondary)', marginBottom: '5px', fontSize: '0.85rem', textTransform: 'uppercase' }}>Avg Week 2 Cycle Time</h4>
+                <p style={{ fontSize: '1.8rem', fontWeight: 700, color: 'var(--accent-green)' }}>{aggregateData.avgCycleTimeWeek2} <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>days</span></p>
+              </div>
+              <div className="glass-panel" style={{ padding: '15px', textAlign: 'center' }}>
+                <h4 style={{ color: 'var(--text-secondary)', marginBottom: '5px', fontSize: '0.85rem', textTransform: 'uppercase' }}>Total Cards Delivered</h4>
+                <p style={{ fontSize: '1.8rem', fontWeight: 700, color: '#fff' }}>{aggregateData.totalCardsCompleted}</p>
+              </div>
+            </div>
+
+            {/* Aggregate Charts */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
+              <div className="glass-panel" style={{ padding: '20px', minHeight: '350px' }}>
+                <h3 style={{ marginBottom: '15px', fontSize: '1.1rem', borderBottom: '1px solid var(--border-glass)', paddingBottom: '8px' }}>
+                  WIP Limit Impact on Cycle Time (Historical Comparison)
+                </h3>
+                <div style={{ width: '100%', height: '260px' }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={[
+                      { name: 'Week 1 (Unconstrained WIP)', CycleTime: aggregateData.avgCycleTimeWeek1 },
+                      { name: 'Week 2 (WIP Limits & Pairing)', CycleTime: aggregateData.avgCycleTimeWeek2 }
+                    ]} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="name" stroke="var(--text-secondary)" fontSize={10} />
+                      <YAxis stroke="var(--text-secondary)" fontSize={10} label={{ value: 'Avg Cycle Time (Days)', angle: -90, position: 'insideLeft', offset: 10, fill: 'var(--text-secondary)', fontSize: 10 }} />
+                      <Tooltip contentStyle={{ backgroundColor: 'rgba(15, 23, 42, 0.95)', borderColor: 'var(--border-glass)', borderRadius: '8px', color: '#fff' }} />
+                      <Bar dataKey="CycleTime" name="Average Cycle Time (Days)">
+                        <Cell fill="var(--accent-red)" />
+                        <Cell fill="var(--accent-green)" />
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '15px', fontStyle: 'italic', textAlign: 'center' }}>
+                  This chart aggregates all historic finished game runs to demonstrate how restricting Work In Progress (WIP) and pairing developers impacts average cycle times.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="glass-panel" style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+            No historical data found. Complete at least one multiplayer game (Day 10) to see aggregate class trends.
+          </div>
+        )
+      ) : (
+        <>
+          {/* Top Level Summary Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '15px' }}>
         <div className="glass-panel" style={{ padding: '15px', textAlign: 'center' }}>
           <h4 style={{ color: 'var(--text-secondary)', marginBottom: '5px', fontSize: '0.85rem', textTransform: 'uppercase' }}>Throughput</h4>
@@ -312,8 +475,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ logs, completedCards, acti
             </div>
           )}
         </div>
-
       </div>
+
+      </>
+    )}
     </div>
   );
 };

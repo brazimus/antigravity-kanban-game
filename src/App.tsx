@@ -1,25 +1,41 @@
 import { useState } from 'react';
 import { useGameState } from './useGameState';
+import { useMultiplayerState } from './useMultiplayerState';
 import { Board } from './components/Board';
 import { Controls } from './components/Controls';
 import { Dashboard } from './components/Dashboard';
+import { MultiplayerLobby } from './components/MultiplayerLobby';
 import { 
   LayoutGrid, BarChart3, Play, HelpCircle 
 } from 'lucide-react';
 import './App.css';
 
 function App() {
+  const [mode, setMode] = useState<'single' | 'multi'>('single');
+  const [roomCode, setRoomCode] = useState<string | null>(null);
+  const [currentPlayerId, setCurrentPlayerId] = useState<string | null>(null);
+  const [playerName, setPlayerName] = useState<string>('');
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
+
+  const singleEngine = useGameState();
+  const multiEngine = useMultiplayerState(roomCode, currentPlayerId, isAdmin);
+
+  const isMulti = mode === 'multi' && roomCode !== null;
+  const activeEngine = isMulti 
+    ? { ...multiEngine, startGame: () => multiEngine.createRoom('easy_mode') } 
+    : singleEngine;
+
   const {
     gameState,
-    startGame,
     rollDice,
     allocateCapacity,
     resetDailyWork,
     moveCard,
     endDay,
     startNextDay,
-    replenishBacklog
-  } = useGameState();
+    replenishBacklog,
+    startGame
+  } = activeEngine;
 
   const [activeTab, setActiveTab] = useState<'board' | 'metrics'>('board');
   const [showTutorialModal, setShowTutorialModal] = useState(false);
@@ -115,7 +131,76 @@ function App() {
         )}
 
         {/* Action Controls */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '15px' }}>
+          {/* Mode Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', fontWeight: 700, textTransform: 'uppercase' }}>Mode:</span>
+            <select
+              value={mode}
+              onChange={(e) => {
+                const selectedMode = e.target.value as 'single' | 'multi';
+                setMode(selectedMode);
+                if (selectedMode === 'single') {
+                  setRoomCode(null);
+                  setCurrentPlayerId(null);
+                  setIsAdmin(false);
+                }
+              }}
+              style={{
+                padding: '4px 8px',
+                fontSize: '0.75rem',
+                backgroundColor: 'rgba(0,0,0,0.3)',
+                border: '1px solid var(--border-glass)',
+                color: '#fff',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-title)',
+                fontWeight: 600
+              }}
+            >
+              <option value="single">Single Player (Offline)</option>
+              <option value="multi">Multiplayer (Classroom)</option>
+            </select>
+          </div>
+
+          {/* Room Display Code */}
+          {isMulti && (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              backgroundColor: 'rgba(255,255,255,0.05)',
+              padding: '4px 10px',
+              borderRadius: '4px',
+              border: '1px solid var(--border-glass)',
+              fontSize: '0.75rem'
+            }}>
+              <span>Room: <strong style={{ color: 'var(--secondary)', fontFamily: 'monospace' }}>{roomCode}</strong></span>
+              <span style={{ color: 'var(--text-muted)' }}>|</span>
+              <span style={{ color: isAdmin ? 'var(--accent-amber)' : 'var(--primary)', fontWeight: 600 }}>
+                {isAdmin ? 'Instructor' : playerName}
+              </span>
+              <button
+                onClick={() => {
+                  setRoomCode(null);
+                  setCurrentPlayerId(null);
+                  setIsAdmin(false);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--accent-red)',
+                  fontSize: '0.7rem',
+                  cursor: 'pointer',
+                  marginLeft: '5px',
+                  textDecoration: 'underline'
+                }}
+              >
+                Leave
+              </button>
+            </div>
+          )}
+
           <button 
             onClick={() => setShowTutorialModal(true)} 
             className="btn btn-secondary" 
@@ -123,7 +208,6 @@ function App() {
           >
             <HelpCircle size={14} /> How to Play
           </button>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>v1.0.0 (Easy Mode)</span>
         </div>
       </header>
 
@@ -136,8 +220,21 @@ function App() {
         display: 'flex',
       }}>
         
-        {/* GAME PLAYPHASE: INTRO SPLASH SCREEN */}
-        {gameState.gamePhase === 'intro' ? (
+        {mode === 'multi' && !roomCode ? (
+          <MultiplayerLobby 
+            onJoinAsPlayer={(code, name, _color, playerId) => {
+              setRoomCode(code);
+              setPlayerName(name);
+              setCurrentPlayerId(playerId);
+              setIsAdmin(false);
+            }}
+            onJoinAsAdmin={(code, adminId, _isNew, _scenarioId) => {
+              setRoomCode(code);
+              setCurrentPlayerId(adminId);
+              setIsAdmin(true);
+            }}
+          />
+        ) : gameState.gamePhase === 'intro' ? (
           <div style={{
             flex: 1,
             display: 'flex',
@@ -250,6 +347,8 @@ function App() {
                     onMoveCard={moveCard}
                     gamePhase={gameState.gamePhase}
                     onReplenishBacklog={replenishBacklog}
+                    currentPlayerId={currentPlayerId}
+                    isAdmin={isAdmin}
                   />
                 </div>
 
@@ -262,6 +361,9 @@ function App() {
                     onStartNextDay={startNextDay}
                     onRestartGame={startGame}
                     onResetDailyWork={resetDailyWork}
+                    isMultiplayer={mode === 'multi'}
+                    isAdmin={isAdmin}
+                    onQueueEvent={isMulti ? multiEngine.queueEvent : undefined}
                   />
                 </div>
               </>
@@ -273,6 +375,8 @@ function App() {
                   completedCards={completedCards}
                   activeCards={activeCards}
                   currentDay={gameState.day}
+                  isMultiplayer={mode === 'multi'}
+                  isAdmin={isAdmin}
                 />
               </div>
             )}

@@ -9,6 +9,9 @@ interface ControlsProps {
   onStartNextDay: () => void;
   onRestartGame: () => void;
   onResetDailyWork: () => void;
+  isMultiplayer?: boolean;
+  isAdmin?: boolean;
+  onQueueEvent?: (eventId: string | null) => void;
 }
 
 export const Controls: React.FC<ControlsProps> = ({
@@ -18,6 +21,9 @@ export const Controls: React.FC<ControlsProps> = ({
   onStartNextDay,
   onRestartGame,
   onResetDailyWork,
+  isMultiplayer = false,
+  isAdmin = false,
+  onQueueEvent
 }) => {
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -59,57 +65,90 @@ export const Controls: React.FC<ControlsProps> = ({
         {/* Phase-specific actions */}
         <div style={{ marginTop: '15px' }}>
           {gameState.gamePhase === 'day_start' && (
-            <button 
-              onClick={onRollDice} 
-              className="btn btn-primary pulse-primary" 
-              style={{ width: '100%', padding: '12px' }}
-            >
-              <Dices size={16} /> Roll Capacity Dice
-            </button>
+            isMultiplayer && isAdmin ? (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                Waiting for players to roll capacity dice...
+              </p>
+            ) : isMultiplayer && gameState.rolledToday ? (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                Dice rolled! Waiting for other players to finish rolling...
+              </p>
+            ) : (
+              <button 
+                onClick={onRollDice} 
+                className="btn btn-primary pulse-primary" 
+                style={{ width: '100%', padding: '12px' }}
+              >
+                <Dices size={16} /> Roll Capacity Dice
+              </button>
+            )
           )}
 
           {gameState.gamePhase === 'dice_rolled' && (
             <div>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
-                <button 
-                  onClick={onResetDailyWork} 
-                  className="btn btn-secondary" 
-                  style={{ flex: 1, padding: '10px', fontSize: '0.8rem', gap: '4px' }}
-                >
-                  <RotateCcw size={12} /> Undo Today
-                </button>
-                <button 
-                  onClick={onEndDay} 
-                  className="btn btn-primary" 
-                  style={{ 
-                    flex: 2, 
-                    padding: '10px', 
-                    fontSize: '0.8rem',
-                    backgroundColor: totalRemainingCapacity === 0 ? 'var(--accent-green)' : 'var(--primary)',
-                    boxShadow: totalRemainingCapacity === 0 ? 'var(--shadow-neon-success)' : 'var(--shadow-neon-primary)',
-                    gap: '4px'
-                  }}
-                >
-                  <CheckSquare size={12} /> Run Day {gameState.day} →
-                </button>
-              </div>
-              <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
-                {totalRemainingCapacity > 0 
-                  ? `Remaining team capacity: ${totalRemainingCapacity} pt${totalRemainingCapacity !== 1 ? 's' : ''} left.` 
-                  : 'All capacity allocated! Click Run Day to progress.'
-                }
-              </p>
+              {isMultiplayer && !isAdmin ? (
+                <div>
+                  <button 
+                    onClick={onResetDailyWork} 
+                    className="btn btn-secondary" 
+                    style={{ width: '100%', padding: '10px', fontSize: '0.8rem', gap: '4px', marginBottom: '10px', justifyContent: 'center' }}
+                  >
+                    <RotateCcw size={12} /> Revert My Allocations
+                  </button>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--accent-amber)', textAlign: 'center', fontWeight: 600 }}>
+                    Waiting for instructor to run the day...
+                  </p>
+                </div>
+              ) : (
+                <div>
+                  <div style={{ display: 'flex', gap: '8px', marginBottom: '10px' }}>
+                    <button 
+                      onClick={onResetDailyWork} 
+                      className="btn btn-secondary" 
+                      style={{ flex: 1, padding: '10px', fontSize: '0.8rem', gap: '4px' }}
+                    >
+                      <RotateCcw size={12} /> Undo Today
+                    </button>
+                    <button 
+                      onClick={onEndDay} 
+                      className="btn btn-primary" 
+                      style={{ 
+                        flex: 2, 
+                        padding: '10px', 
+                        fontSize: '0.8rem',
+                        backgroundColor: totalRemainingCapacity === 0 ? 'var(--accent-green)' : 'var(--primary)',
+                        boxShadow: totalRemainingCapacity === 0 ? 'var(--shadow-neon-success)' : 'var(--shadow-neon-primary)',
+                        gap: '4px'
+                      }}
+                    >
+                      <CheckSquare size={12} /> Run Day {gameState.day} →
+                    </button>
+                  </div>
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                    {totalRemainingCapacity > 0 
+                      ? `Remaining team capacity: ${totalRemainingCapacity} pts left.` 
+                      : 'All capacity allocated! Click Run Day to progress.'
+                    }
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
           {gameState.gamePhase === 'day_summary' && (
-            <button 
-              onClick={onStartNextDay} 
-              className="btn btn-primary pulse-primary" 
-              style={{ width: '100%', padding: '12px', backgroundColor: 'var(--secondary)', boxShadow: '0 0 15px rgba(6, 182, 212, 0.3)' }}
-            >
-              <ArrowRight size={16} /> Start Day {gameState.day + 1}
-            </button>
+            isMultiplayer && !isAdmin ? (
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
+                Day summary complete. Waiting for instructor to start Day {gameState.day + 1}...
+              </p>
+            ) : (
+              <button 
+                onClick={onStartNextDay} 
+                className="btn btn-primary pulse-primary" 
+                style={{ width: '100%', padding: '12px', backgroundColor: 'var(--secondary)', boxShadow: '0 0 15px rgba(6, 182, 212, 0.3)' }}
+              >
+                <ArrowRight size={16} /> Start Day {gameState.day + 1}
+              </button>
+            )
           )}
 
           {gameState.gamePhase === 'game_over' && (
@@ -117,17 +156,62 @@ export const Controls: React.FC<ControlsProps> = ({
               <p style={{ fontSize: '0.8rem', color: 'var(--accent-green)', fontWeight: 600, marginBottom: '10px' }}>
                 Simulation completed successfully!
               </p>
-              <button 
-                onClick={onRestartGame} 
-                className="btn btn-danger" 
-                style={{ width: '100%', padding: '12px' }}
-              >
-                <RotateCcw size={16} /> Restart Simulation
-              </button>
+              {(!isMultiplayer || isAdmin) && (
+                <button 
+                  onClick={onRestartGame} 
+                  className="btn btn-danger" 
+                  style={{ width: '100%', padding: '12px' }}
+                >
+                  <RotateCcw size={16} /> Restart Simulation
+                </button>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      {/* Instructor Scenario Controller (Multiplayer & Admin Only) */}
+      {isMultiplayer && isAdmin && onQueueEvent && (
+        <div className="glass-panel" style={{ padding: '15px', borderLeft: '4px solid var(--secondary)' }}>
+          <h3 style={{ fontSize: '0.85rem', marginBottom: '8px', textTransform: 'uppercase', color: 'var(--secondary)', fontWeight: 700 }}>
+            Instructor Event Controller
+          </h3>
+          <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+            Queue an event to trigger tomorrow:
+          </p>
+          
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {[
+              { id: null, label: 'None (Standard Day)' },
+              { id: 'wip_limits', label: 'Adopt WIP Limits & Pairing' },
+              { id: 'outage', label: 'Production Outage (Expedite)' },
+              { id: 'tech_debt', label: 'Technical Debt Degradation' },
+              { id: 'blocker', label: 'Block Random Development Card' }
+            ].map(evt => {
+              const isSelected = gameState.nextEventId === evt.id;
+              return (
+                <button
+                  key={evt.id ?? 'none'}
+                  onClick={() => onQueueEvent(evt.id)}
+                  className="btn"
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    fontSize: '0.7rem',
+                    backgroundColor: isSelected ? 'rgba(6, 182, 212, 0.2)' : 'rgba(255,255,255,0.03)',
+                    color: isSelected ? 'var(--secondary)' : '#fff',
+                    border: isSelected ? '1px solid var(--secondary)' : '1px solid var(--border-glass)',
+                    borderRadius: '4px',
+                    justifyContent: 'flex-start'
+                  }}
+                >
+                  {isSelected ? '✓ ' : ''}{evt.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Developer Capacity Status */}
       <div className="glass-panel" style={{ padding: '15px' }}>
