@@ -8,7 +8,8 @@
     4.  Only notify the Product Owner for review after the live build is verified green.
 
 ## Agentic Test-Driven Development (TDD) Policy
-*   **Test-First Implementation**: Write unit or integration tests *first* for any new capability, feature, or bug fix before modifying the core state engines or layout components.
+*   **BDD-First & Test-First Implementation**: All development work must start with defining Gherkin scenarios in a `.feature` file and implementing step definition tests first before writing features or modifying core components.
+*   **Business Stakeholder Translation**: Treat the Product Owner as a business stakeholder. Help translate conceptual goals into testable Given-When-Then Gherkin BDD scenarios.
 *   **Verify Red Phase**: Run the tests to confirm they fail (red phase) before writing the code to make them pass (green phase).
 *   **100% Core Coverage Target**: Maintain test coverage targeting 100% (with a hard floor of 95%) for all core state engines (`src/useGameState.ts`, `src/useMultiplayerState.ts`, helper methods).
 *   **Zero-Defects & Warnings**: Handover is blocked if there are compile errors, TypeScript warnings, or failing tests.
