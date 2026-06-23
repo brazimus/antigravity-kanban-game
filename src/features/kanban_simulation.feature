@@ -72,4 +72,43 @@ Feature: Kanban Simulation Flow Accelerators and Scenarios
     When Week 2 completes and reaches weekend summary
     Then the "smaller_batches" option is highlighted as a recommended flow fix
 
+  # ==========================================
+  # Phase 1: Card Movement Scenarios (10-14)
+  # ==========================================
 
+  Scenario: Card Movement with Effort Completion
+    Given a new game is started
+    And a standard card in Analysis has 0 remaining analysis effort
+    When the card is moved to Development
+    Then the move succeeds
+    And the card's startedAt is set to the current day
+    And the card's history includes the Development column
+
+  Scenario: WIP Limit Blocks Standard Card Movement
+    Given a new game is started
+    And WIP Limits accelerator is active
+    And Development column has 2 cards filling WIP limit of 2
+    When a standard card is moved to Development
+    Then the move is blocked with a WIP limit warning
+    And the card remains in its original column
+
+  Scenario: Expedite Card Bypasses WIP Limits
+    Given a new game is started
+    And WIP Limits accelerator is active
+    And Development column has 2 cards filling WIP limit of 2
+    When an expedite card is moved to Development
+    Then the move succeeds despite WIP limit
+
+  Scenario: Blocked Card Cannot Move Forward
+    Given a new game is started
+    And a card in Development is blocked
+    When the blocked card is moved forward to Testing
+    Then the move is blocked with a blocker warning
+    And the blocked card remains in Development
+
+  Scenario: Incomplete Effort Prevents Forward Movement
+    Given a new game is started
+    And a card in Analysis has 3 remaining analysis effort
+    When the card is moved forward to Development
+    Then the move is blocked with an effort remaining warning
+    And the card stays in Analysis
