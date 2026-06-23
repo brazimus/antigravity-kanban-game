@@ -1,12 +1,79 @@
 import React, { useRef, useEffect, useState } from 'react';
 import type { GameState } from '../types';
-import { Dices, RotateCcw, ArrowRight, CheckSquare, BookOpen } from 'lucide-react';
+import { Dices, RotateCcw, ArrowRight, CheckSquare, BookOpen, RefreshCw, Shield, Zap, Users, Scissors, Calendar, AlertTriangle, Monitor, Sparkles } from 'lucide-react';
+
+const RECOMMENDATION_MAP: { [key: string]: string } = {
+  'tradeshow': 'smaller_batches',
+  'security_breach': 'wip_limits',
+  'os_upgrade': 'swarming',
+  'wip_limits': 'security_breach',
+  'shift_left': 'os_upgrade'
+};
+
+const cyoaScenarios = [
+  {
+    id: 'reset',
+    name: 'Baseline Chaos',
+    description: 'Remove all accelerators and events to see baseline flow.',
+    category: 'System Baseline',
+    color: '#6b7280',
+  },
+  {
+    id: 'wip_limits',
+    name: 'Visualize & Limit WIP',
+    description: 'Enforce WIP limits: Analysis (2), Dev (2), Test (1). Enables developer pairing.',
+    category: 'Flow Accelerator',
+    color: '#8b5cf6',
+  },
+  {
+    id: 'shift_left',
+    name: 'Shift-Left Continuous Testing',
+    description: 'Eliminates the testing column queue. Dev and test effort are worked concurrently.',
+    category: 'Flow Accelerator',
+    color: '#06b6d4',
+  },
+  {
+    id: 'swarming',
+    name: 'Cross-Functional Swarming',
+    description: 'Reduces context-switching penalty to 0 when swarming to help teammates.',
+    category: 'Flow Accelerator',
+    color: '#f59e0b',
+  },
+  {
+    id: 'smaller_batches',
+    name: 'Story Splitting & Smaller Batches',
+    description: 'Halves effort requirements on backlog cards. Splits Trade Show Epic into stories.',
+    category: 'Flow Accelerator',
+    color: '#10b981',
+  },
+  {
+    id: 'tradeshow',
+    name: 'Trade Show Deadline',
+    description: 'Injects a monolithic Epic demo card (Dev: 12, Test: 6) with prep overhead.',
+    category: 'Business Event',
+    color: '#ec4899',
+  },
+  {
+    id: 'security_breach',
+    name: 'Security Breach Resolution',
+    description: 'Blocks 50% of active Dev cards and injects urgent expedite cards that bypass WIP limits.',
+    category: 'Business Event',
+    color: '#ef4444',
+  },
+  {
+    id: 'os_upgrade',
+    name: 'Client OS Upgrade',
+    description: 'Triggers workstation upgrades capacity overhead and increases blocker risk.',
+    category: 'Business Event',
+    color: '#3b82f6',
+  }
+];
 
 interface ControlsProps {
   gameState: GameState;
   onRollDice: () => void;
   onEndDay: () => void;
-  onStartNextDay: (accelerators?: {
+  onStartNextDay: (scenarioIdOrAcc?: string | {
     wipLimitsActive?: boolean;
     shiftLeftActive?: boolean;
     swarmingActive?: boolean;
@@ -20,6 +87,7 @@ interface ControlsProps {
   onFastForward?: () => void;
   onInjectCustomExpediteCards?: (titlePrefix: string, count: number) => void;
 }
+
 
 export const Controls: React.FC<ControlsProps> = ({
   gameState,
@@ -42,6 +110,16 @@ export const Controls: React.FC<ControlsProps> = ({
   const [swarmingActive, setSwarmingActive] = useState(gameState.swarmingActive || false);
   const [smallerBatchesActive, setSmallerBatchesActive] = useState(gameState.smallerBatchesActive || false);
 
+  const getInitialScenarioId = () => {
+    if (gameState.wipLimitsActive) return 'wip_limits';
+    if (gameState.shiftLeftActive) return 'shift_left';
+    if (gameState.swarmingActive) return 'swarming';
+    if (gameState.smallerBatchesActive) return 'smaller_batches';
+    return 'reset';
+  };
+
+  const [selectedCYOAScenario, setSelectedCYOAScenario] = useState(getInitialScenarioId());
+
   // Local states for custom urgent work injector
   const [urgentTitle, setUrgentTitle] = useState('Security Breach Resolution');
   const [urgentCount, setUrgentCount] = useState(2);
@@ -52,7 +130,9 @@ export const Controls: React.FC<ControlsProps> = ({
     setShiftLeftActive(gameState.shiftLeftActive || false);
     setSwarmingActive(gameState.swarmingActive || false);
     setSmallerBatchesActive(gameState.smallerBatchesActive || false);
+    setSelectedCYOAScenario(getInitialScenarioId());
   }, [gameState.wipLimitsActive, gameState.shiftLeftActive, gameState.swarmingActive, gameState.smallerBatchesActive, gameState.gamePhase]);
+
 
   // Auto-scroll logs to bottom
   useEffect(() => {
@@ -183,6 +263,115 @@ export const Controls: React.FC<ControlsProps> = ({
               <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', textAlign: 'center' }}>
                 Weekend: Reviewing week performance. Waiting for instructor to select next week parameters...
               </p>
+            ) : !isMultiplayer ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <h3 style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '5px' }}>
+                  Choose Your Next Adventure
+                </h3>
+                <p style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', margin: '0 0 5px 0', lineHeight: 1.3 }}>
+                  Select exactly one accelerator or business event. We limit variables so that impacts are clear.
+                </p>
+
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  gap: '8px', 
+                  maxHeight: '340px', 
+                  overflowY: 'auto', 
+                  paddingRight: '5px',
+                  marginBottom: '5px'
+                }}>
+                  {cyoaScenarios.map((scenario) => {
+                    const isSelected = selectedCYOAScenario === scenario.id;
+                    const isRecommended = RECOMMENDATION_MAP[gameState.lastSelectedScenarioId || ''] === scenario.id;
+                    
+                    return (
+                      <div
+                        key={scenario.id}
+                        onClick={() => setSelectedCYOAScenario(scenario.id)}
+                        className={`cyoa-card ${isSelected ? 'active' : ''}`}
+                        style={{
+                          cursor: 'pointer',
+                          padding: '10px',
+                          borderRadius: 'var(--radius-sm)',
+                          border: isSelected ? `2px solid ${scenario.color}` : '1px solid var(--border-glass)',
+                          backgroundColor: isSelected ? `${scenario.color}0a` : 'rgba(255,255,255,0.01)',
+                          boxShadow: isSelected ? `0 0 10px ${scenario.color}22` : 'none',
+                          position: 'relative',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '4px'
+                        }}
+                      >
+                        {isRecommended && (
+                          <span 
+                            className="recommend-badge"
+                            style={{
+                              position: 'absolute',
+                              top: '-8px',
+                              right: '8px',
+                              backgroundColor: 'var(--accent-green)',
+                              color: '#111827',
+                              fontSize: '0.55rem',
+                              fontWeight: 800,
+                              padding: '1px 6px',
+                              borderRadius: '8px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '2px',
+                              zIndex: 1
+                            }}
+                          >
+                            <Sparkles size={8} /> 💡 Recommended Flow Fix
+                          </span>
+                        )}
+                        
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span style={{ 
+                            display: 'inline-flex', 
+                            alignItems: 'center', 
+                            justifyContent: 'center', 
+                            width: '24px', 
+                            height: '24px', 
+                            borderRadius: '50%', 
+                            backgroundColor: `${scenario.color}15`, 
+                            color: scenario.color 
+                          }}>
+                            {scenario.id === 'reset' && <RefreshCw size={12} />}
+                            {scenario.id === 'wip_limits' && <Shield size={12} />}
+                            {scenario.id === 'shift_left' && <Zap size={12} />}
+                            {scenario.id === 'swarming' && <Users size={12} />}
+                            {scenario.id === 'smaller_batches' && <Scissors size={12} />}
+                            {scenario.id === 'tradeshow' && <Calendar size={12} />}
+                            {scenario.id === 'security_breach' && <AlertTriangle size={12} />}
+                            {scenario.id === 'os_upgrade' && <Monitor size={12} />}
+                          </span>
+                          <div style={{ display: 'flex', flexDirection: 'column' }}>
+                            <span style={{ fontSize: '0.55rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.2px', lineHeight: 1 }}>
+                              {scenario.category}
+                            </span>
+                            <h4 style={{ fontSize: '0.7rem', fontWeight: 700, margin: 0, color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)' }}>
+                              {scenario.name}
+                            </h4>
+                          </div>
+                        </div>
+                        
+                        <p style={{ fontSize: '0.6rem', color: 'var(--text-secondary)', margin: 0, lineHeight: 1.25 }}>
+                          {scenario.description}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+                
+                <button 
+                  onClick={() => onStartNextDay(selectedCYOAScenario)} 
+                  className="btn btn-primary pulse-primary" 
+                  style={{ width: '100%', padding: '12px', backgroundColor: 'var(--accent-green)', boxShadow: 'var(--shadow-neon-success)' }}
+                >
+                  🚀 Launch Next Week (Days {gameState.day + 1}-{gameState.day + 5})
+                </button>
+              </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 <h3 style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '5px' }}>
@@ -248,6 +437,7 @@ export const Controls: React.FC<ControlsProps> = ({
               </div>
             )
           )}
+
 
           {gameState.gamePhase === 'game_over' && (
             <div style={{ textAlign: 'center' }}>

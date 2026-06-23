@@ -122,4 +122,6 @@ export interface GameState {
   config?: GameConfig;
   customEventTitle?: string;
   customEventCount?: number;
+  lastSelectedScenarioId?: string;
 }
+

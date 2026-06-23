@@ -49,3 +49,16 @@ Feature: Kanban Simulation Flow Accelerators and Scenarios
     Given a new game is started with custom unblock cost of 3 and blocker chance of 25 percent
     Then the game configuration reflects the custom unblock cost of 3
     And the game configuration reflects the blocker chance of 25 percent
+
+  Scenario: Choose Your Own Adventure Weekend Selector Constraints
+    Given a new game is started
+    When Week 1 completes and reaches weekend summary
+    Then exactly one scenario option is allowed to be selected
+    And selecting a scenario clears other active accelerators
+
+  Scenario: Related Scenario Recommendations
+    Given a new game is started
+    And the last week's selected scenario was "tradeshow"
+    When the weekend summary is viewed
+    Then the "smaller_batches" option is highlighted as a recommended flow fix
+

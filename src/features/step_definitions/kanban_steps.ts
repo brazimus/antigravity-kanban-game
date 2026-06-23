@@ -236,4 +236,64 @@ export const registerSteps = (runner: BddRunner) => {
   runner.register(/^the game configuration reflects the blocker chance of (\d+) percent$/, (context, percent) => {
     expect(context.result.current.gameState.config.blockerChance).toBe(percent / 100);
   });
+
+  runner.register(/^Week 1 completes and reaches weekend summary$/, (context) => {
+    act(() => {
+      context.result.current.fastForwardToWeekEnd();
+    });
+    expect(context.result.current.gameState.gamePhase).toBe('week_summary');
+  });
+
+  runner.register(/^exactly one scenario option is allowed to be selected$/, (context) => {
+    act(() => {
+      context.result.current.startNextDay('wip_limits');
+    });
+    const state = context.result.current.gameState;
+    expect(state.wipLimitsActive).toBe(true);
+    expect(state.shiftLeftActive).toBe(false);
+    expect(state.swarmingActive).toBe(false);
+    expect(state.smallerBatchesActive).toBe(false);
+  });
+
+  runner.register(/^selecting a scenario clears other active accelerators$/, (context) => {
+    act(() => {
+      context.result.current.startNextDay('shift_left');
+    });
+    const state = context.result.current.gameState;
+    expect(state.wipLimitsActive).toBe(false);
+    expect(state.shiftLeftActive).toBe(true);
+  });
+
+  runner.register(/^the last week's selected scenario was "(.*)"$/, (context, scenarioId) => {
+    act(() => {
+      context.result.current.fastForwardToWeekEnd();
+    });
+    act(() => {
+      context.result.current.startNextDay(scenarioId);
+    });
+    expect(context.result.current.gameState.lastSelectedScenarioId).toBe(scenarioId);
+  });
+
+  runner.register(/^the weekend summary is viewed$/, (context) => {
+    act(() => {
+      context.result.current.fastForwardToWeekEnd();
+    });
+    expect(context.result.current.gameState.gamePhase).toBe('week_summary');
+  });
+
+  runner.register(/^the "(.*)" option is highlighted as a recommended flow fix$/, (context, expectedRecId) => {
+    const lastId = context.result.current.gameState.lastSelectedScenarioId;
+    expect(lastId).toBeDefined();
+    
+    const recommendations: { [key: string]: string } = {
+      'tradeshow': 'smaller_batches',
+      'security_breach': 'wip_limits',
+      'os_upgrade': 'swarming',
+      'wip_limits': 'security_breach',
+      'shift_left': 'os_upgrade'
+    };
+    const recommended = recommendations[lastId!];
+    expect(recommended).toBe(expectedRecId);
+  });
 };
+

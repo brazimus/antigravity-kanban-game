@@ -832,7 +832,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
   }, [roomCode, isAdmin, gameState.day]);
 
   // Start Next Day & Trigger Queued Scenarios (Admin Only)
-  const startNextDay = useCallback(async (accelerators?: {
+  const startNextDay = useCallback(async (scenarioIdOrAcc?: string | {
     wipLimitsActive?: boolean;
     shiftLeftActive?: boolean;
     swarmingActive?: boolean;
@@ -854,18 +854,47 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
       let nextEvent = null;
 
       // Extract new or current accelerator toggles
-      let wipLimitsActive = gameData.wipLimitsActive || false;
-      let shiftLeftActive = gameData.shiftLeftActive || false;
-      let swarmingActive = gameData.swarmingActive || false;
-      let smallerBatchesActive = gameData.smallerBatchesActive || false;
+      let lastSelectedScenarioId = gameData.lastSelectedScenarioId || null;
+      let nextEventId = gameData.nextEventId || null;
 
-      if (accelerators) {
-        wipLimitsActive = !!accelerators.wipLimitsActive;
-        shiftLeftActive = !!accelerators.shiftLeftActive;
-        swarmingActive = !!accelerators.swarmingActive;
-        smallerBatchesActive = !!accelerators.smallerBatchesActive;
-        pairingAllowed = wipLimitsActive; // Pairing enabled when WIP limits are active
+      let wipLimitsActive = false;
+      let shiftLeftActive = false;
+      let swarmingActive = false;
+      let smallerBatchesActive = false;
+
+      if (typeof scenarioIdOrAcc === 'string') {
+        lastSelectedScenarioId = scenarioIdOrAcc;
+        if (scenarioIdOrAcc === 'wip_limits') {
+          wipLimitsActive = true;
+        } else if (scenarioIdOrAcc === 'shift_left') {
+          shiftLeftActive = true;
+        } else if (scenarioIdOrAcc === 'swarming') {
+          swarmingActive = true;
+        } else if (scenarioIdOrAcc === 'smaller_batches') {
+          smallerBatchesActive = true;
+        } else if (scenarioIdOrAcc === 'tradeshow') {
+          nextEventId = 'tradeshow';
+        } else if (scenarioIdOrAcc === 'security_breach') {
+          nextEventId = 'outage';
+        } else if (scenarioIdOrAcc === 'os_upgrade') {
+          nextEventId = 'os_upgrade';
+        } else if (scenarioIdOrAcc === 'reset') {
+          nextEventId = null;
+        }
+        pairingAllowed = wipLimitsActive;
+      } else if (scenarioIdOrAcc && typeof scenarioIdOrAcc === 'object') {
+        wipLimitsActive = !!scenarioIdOrAcc.wipLimitsActive;
+        shiftLeftActive = !!scenarioIdOrAcc.shiftLeftActive;
+        swarmingActive = !!scenarioIdOrAcc.swarmingActive;
+        smallerBatchesActive = !!scenarioIdOrAcc.smallerBatchesActive;
+        pairingAllowed = wipLimitsActive;
+      } else {
+        wipLimitsActive = gameData.wipLimitsActive || false;
+        shiftLeftActive = gameData.shiftLeftActive || false;
+        swarmingActive = gameData.swarmingActive || false;
+        smallerBatchesActive = gameData.smallerBatchesActive || false;
       }
+
 
       // Reset columns limits locally
       let columnsWipConfig = [...gameState.columns];
@@ -916,8 +945,8 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
       }
 
       // Handle custom triggered scenario events selected by admin
-      if (gameData.nextEventId) {
-        if (gameData.nextEventId === 'wip_limits') {
+      if (nextEventId) {
+        if (nextEventId === 'wip_limits') {
           wipLimitsActive = true;
           pairingAllowed = true;
           columnsWipConfig = columnsWipConfig.map(col => {
@@ -931,7 +960,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
             description: 'The team adopts Kanban WIP limits: Analysis (2), Development (2), Testing (1). Pairing is now enabled! Collaborating developers roll with advantage to ignore blocker checks.'
           };
           logs.push(`[System] Instructor enforced Kanban WIP limits & enabled Developer Pairing.`);
-        } else if (gameData.nextEventId === 'outage') {
+        } else if (nextEventId === 'outage') {
           // Add urgent expedite card
           const hotfixId = `card_hotfix_${generateId()}`;
           const hotfix: Card = {
@@ -957,13 +986,13 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
             description: 'An urgent Production Hotfix card has arrived in the Ready column. It is marked EXPEDITE and is allowed to bypass WIP limits. Get all hands on deck!'
           };
           logs.push(`[Alert] PRODUCTION OUTAGE! Expedite hotfix card added to the Ready column.`);
-        } else if (gameData.nextEventId === 'tech_debt') {
+        } else if (nextEventId === 'tech_debt') {
           nextEvent = {
             title: 'Technical Debt Instability',
             description: 'System degradation has occurred. Developers are fighting server issues. Dice rolls for capacity are capped to a maximum of 4 today due to technical debt.'
           };
           logs.push(`[Alert] System degradation active: developer capacity rolls capped due to legacy debt.`);
-        } else if (gameData.nextEventId === 'blocker') {
+        } else if (nextEventId === 'blocker') {
           // Block a random dev card
           const cardsSnap = await getDocs(cardsColRef);
           const devCards: Card[] = [];
@@ -991,7 +1020,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
               description: 'Routine maintenance window complete. No card was blocked as development queue was empty.'
             };
           }
-        } else if (gameData.nextEventId === 'tradeshow') {
+        } else if (nextEventId === 'tradeshow') {
           if (smallerBatchesActive) {
             // Spawn 3 child cards
             const epicId = `epic_tradeshow_${generateId()}`;
@@ -1124,7 +1153,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
             };
             logs.push(`[Event] Injected monolithic Trade Show Demo Epic card into the Ready column.`);
           }
-        } else if (gameData.nextEventId === 'os_upgrade') {
+        } else if (nextEventId === 'os_upgrade') {
           nextEvent = {
             title: 'Client OS Upgrade - Day 1',
             description: 'Workstation upgrades active today. All developers suffer a -2 capacity modifier. Environment drift increases blocker risk to 30% for the next 3 days.',
@@ -1181,7 +1210,8 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
         wipLimitsActive,
         shiftLeftActive,
         swarmingActive,
-        smallerBatchesActive
+        smallerBatchesActive,
+        lastSelectedScenarioId
       });
 
     } catch (err) {

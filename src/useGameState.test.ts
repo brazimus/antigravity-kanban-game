@@ -424,5 +424,41 @@ describe('useGameState Hook', () => {
     expect(epicAfterDay2.epicProgress).toBe(100);
     expect(epicAfterDay2.columnId).toBe('done');
   });
+
+  it('should apply CYOA scenario selection correctly on startNextDay', () => {
+    const { result } = renderHook(() => useGameState());
+    act(() => {
+      result.current.startGame();
+    });
+
+    // Fast forward to weekend
+    act(() => {
+      result.current.fastForwardToWeekEnd();
+    });
+    expect(result.current.gameState.gamePhase).toBe('week_summary');
+
+    // Start next week with 'wip_limits' scenario
+    act(() => {
+      result.current.startNextDay('wip_limits');
+    });
+
+    expect(result.current.gameState.wipLimitsActive).toBe(true);
+    expect(result.current.gameState.shiftLeftActive).toBe(false);
+    expect(result.current.gameState.lastSelectedScenarioId).toBe('wip_limits');
+
+    // Fast forward to next weekend
+    act(() => {
+      result.current.fastForwardToWeekEnd();
+    });
+
+    // Start next week with 'tradeshow' scenario
+    act(() => {
+      result.current.startNextDay('tradeshow');
+    });
+
+    expect(result.current.gameState.wipLimitsActive).toBe(false);
+    expect(result.current.gameState.lastSelectedScenarioId).toBe('tradeshow');
+  });
 });
+
 

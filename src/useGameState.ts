@@ -707,7 +707,7 @@ export const useGameState = () => {
   }, []);
 
   // Advance to next day after viewing summary
-  const startNextDay = useCallback((accelerators?: {
+  const startNextDay = useCallback((scenarioIdOrAcc?: string | {
     wipLimitsActive?: boolean;
     shiftLeftActive?: boolean;
     swarmingActive?: boolean;
@@ -720,16 +720,43 @@ export const useGameState = () => {
       
       const logs = [...prev.eventLogs, `--- Start Day ${nextDay} ---`];
 
-      let wipLimitsActive = prev.wipLimitsActive || false;
-      let shiftLeftActive = prev.shiftLeftActive || false;
-      let swarmingActive = prev.swarmingActive || false;
-      let smallerBatchesActive = prev.smallerBatchesActive || false;
+      let lastSelectedScenarioId = prev.lastSelectedScenarioId;
+      let nextEventId = prev.nextEventId;
 
-      if (accelerators) {
-        wipLimitsActive = !!accelerators.wipLimitsActive;
-        shiftLeftActive = !!accelerators.shiftLeftActive;
-        swarmingActive = !!accelerators.swarmingActive;
-        smallerBatchesActive = !!accelerators.smallerBatchesActive;
+      let wipLimitsActive = false;
+      let shiftLeftActive = false;
+      let swarmingActive = false;
+      let smallerBatchesActive = false;
+
+      if (typeof scenarioIdOrAcc === 'string') {
+        lastSelectedScenarioId = scenarioIdOrAcc;
+        if (scenarioIdOrAcc === 'wip_limits') {
+          wipLimitsActive = true;
+        } else if (scenarioIdOrAcc === 'shift_left') {
+          shiftLeftActive = true;
+        } else if (scenarioIdOrAcc === 'swarming') {
+          swarmingActive = true;
+        } else if (scenarioIdOrAcc === 'smaller_batches') {
+          smallerBatchesActive = true;
+        } else if (scenarioIdOrAcc === 'tradeshow') {
+          nextEventId = 'tradeshow';
+        } else if (scenarioIdOrAcc === 'security_breach') {
+          nextEventId = 'outage';
+        } else if (scenarioIdOrAcc === 'os_upgrade') {
+          nextEventId = 'os_upgrade';
+        } else if (scenarioIdOrAcc === 'reset') {
+          nextEventId = null;
+        }
+      } else if (scenarioIdOrAcc && typeof scenarioIdOrAcc === 'object') {
+        wipLimitsActive = !!scenarioIdOrAcc.wipLimitsActive;
+        shiftLeftActive = !!scenarioIdOrAcc.shiftLeftActive;
+        swarmingActive = !!scenarioIdOrAcc.swarmingActive;
+        smallerBatchesActive = !!scenarioIdOrAcc.smallerBatchesActive;
+      } else {
+        wipLimitsActive = prev.wipLimitsActive || false;
+        shiftLeftActive = prev.shiftLeftActive || false;
+        swarmingActive = prev.swarmingActive || false;
+        smallerBatchesActive = prev.smallerBatchesActive || false;
       }
 
       let updatedCards = [...prev.cards];
@@ -784,8 +811,6 @@ export const useGameState = () => {
       // Let's check how scenarios are selected and run. We can trigger business scenarios in startNextDay using nextEventId as well!
       // Let's add nextEventId to types.ts and to useGameState.ts state!
       
-      let nextEventId = prev.nextEventId;
-
       if (nextEventId === 'wip_limits') {
         wipLimitsActive = true;
         pairingAllowed = true;
@@ -1042,6 +1067,7 @@ export const useGameState = () => {
         shiftLeftActive,
         swarmingActive,
         smallerBatchesActive,
+        lastSelectedScenarioId,
       };
     });
   }, []);

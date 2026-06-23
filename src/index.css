@@ -225,3 +225,32 @@ h1, h2, h3, h4, h5, h6 {
 .pulse-red {
   animation: pulseRed 1.5s infinite ease-in-out;
 }
+
+@keyframes pulseRecommend {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 10px rgba(16, 185, 129, 0.5);
+  }
+  50% {
+    transform: scale(1.03);
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.8);
+  }
+}
+
+.recommend-badge {
+  animation: pulseRecommend 2s infinite ease-in-out;
+}
+
+.cyoa-card {
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.cyoa-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255, 255, 255, 0.2) !important;
+}
+
+.cyoa-card.active:hover {
+  transform: translateY(-2px);
+}
+
