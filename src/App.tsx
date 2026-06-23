@@ -11,6 +11,7 @@ import {
 import type { GameConfig } from './types';
 import './App.css';
 import logoImg from './assets/logo.png';
+import faviconImg from './assets/favicon.png';
 
 function App() {
   // Global App State Variables (analogous to global package variables in Perl)
@@ -85,7 +86,7 @@ function App() {
         {/* Title */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <img 
-            src="/favicon.png" 
+            src={faviconImg} 
             alt="AG Logo" 
             style={{
               width: '32px',
