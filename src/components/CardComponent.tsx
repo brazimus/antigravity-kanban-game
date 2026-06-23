@@ -32,8 +32,7 @@ export const CardComponent: React.FC<CardComponentProps> = ({
   onSplitEpic,
   shiftLeftActive = false,
   swarmingActive = false,
-  isFirst = false,
-  isLast = false
+  isFirst = false
 }) => {
   const [showAddMenu, setShowAddMenu] = useState(false);
   const [selectedShiftLeftEffort, setSelectedShiftLeftEffort] = useState<'development' | 'testing'>('development');

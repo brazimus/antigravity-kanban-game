@@ -550,7 +550,7 @@ function App() {
                     <ul style={{ paddingLeft: '16px', margin: 0, fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
                       {gameState.currentDayEvent.capacityChange.map((change, idx) => (
                         <li key={idx} style={{ marginBottom: '2px' }}>
-                          <strong>{change.avatarId.charAt(0).toUpperCase() + change.avatarId.slice(1)}:</strong> {change.description} (Roll modifier: {change.rollModifier > 0 ? `+${change.rollModifier}` : change.rollModifier})
+                          <strong>{change.avatarId.charAt(0).toUpperCase() + change.avatarId.slice(1)}:</strong> {change.description} (Roll modifier: {change.rollModifier !== undefined && change.rollModifier > 0 ? `+${change.rollModifier}` : change.rollModifier ?? 0})
                         </li>
                       ))}
                     </ul>

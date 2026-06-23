@@ -1,5 +1,5 @@
 import { expect, vi } from 'vitest';
-import { act, render, screen, fireEvent, within } from '@testing-library/react';
+import { act, render, fireEvent, within } from '@testing-library/react';
 import React from 'react';
 import { CardComponent } from '../../components/CardComponent';
 import { Controls } from '../../components/Controls';
