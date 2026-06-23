@@ -307,7 +307,7 @@ function App() {
               </div>
 
               <button 
-                onClick={startGame} 
+                onClick={() => startGame()} 
                 className="btn btn-primary pulse-primary" 
                 style={{ padding: '15px 35px', fontSize: '1rem', borderRadius: 'var(--radius-md)' }}
               >
@@ -377,7 +377,7 @@ function App() {
                     onRollDice={rollDice}
                     onEndDay={endDay}
                     onStartNextDay={startNextDay}
-                    onRestartGame={startGame}
+                    onRestartGame={() => startGame()}
                     onResetDailyWork={resetDailyWork}
                     isMultiplayer={mode === 'multi'}
                     isAdmin={isAdmin}

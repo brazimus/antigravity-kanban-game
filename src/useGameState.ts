@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
-import type { GameState, Card, DailyLog, ScenarioDayEvent } from './types';
+import type { GameState, Card, DailyLog, ScenarioDayEvent, GameConfig } from './types';
 import { easyModeScenario, defaultColumns, defaultAvatars } from './scenarios';
 
 const LOCAL_STORAGE_KEY = 'antigravity_kanban_game_state';
@@ -103,7 +103,7 @@ export const useGameState = () => {
   }, [gameState]);
 
   // Start/Restart Game
-  const startGame = useCallback(() => {
+  const startGame = useCallback((customConfig?: Partial<GameConfig>) => {
     const scenario = easyModeScenario;
     const initialEvent = scenario.events[1];
     
@@ -166,7 +166,8 @@ export const useGameState = () => {
         qaFailChanceUnpaired: 0.20,
         qaFailChancePaired: 0.02,
         unblockCost: 2,
-        pairingHelpCost: 2
+        pairingHelpCost: 2,
+        ...customConfig
       }
     });
   }, []);
