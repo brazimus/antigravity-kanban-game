@@ -7,6 +7,24 @@ const LOCAL_STORAGE_KEY = 'antigravity_kanban_game_state';
 // Helper to generate unique IDs
 const generateId = () => Math.random().toString(36).substring(2, 9);
 
+const BACKLOG_CARD_POOL = [
+  { title: 'Optimize Database Indexing', description: 'Speed up user search queries by index profiling.' },
+  { title: 'Implement OAuth (Google/GitHub)', description: 'Allow users to sign in using their social accounts.' },
+  { title: 'Add PDF Invoicing Support', description: 'Enable billing modules to generate and email PDF receipts.' },
+  { title: 'Refactor Payment Checkout API', description: 'Improve codebase readability and reliability for payments.' },
+  { title: 'Design Admin User Management', description: 'Create dashboard view to search, block, and manage accounts.' },
+  { title: 'Build Push Notification Service', description: 'Notify users in real-time about service status updates.' },
+  { title: 'Integrate Live Chat Support Widget', description: 'Add Intercom widget for customer inquiries.' },
+  { title: 'Configure CDN Asset Caching', description: 'Drastically improve LCP performance with edge caching.' },
+  { title: 'Implement MFA login validation', description: 'Add TOTP multi-factor verification for security compliance.' },
+  { title: 'Export Usage Reports as CSV', description: 'Allow enterprise customers to download audit data.' },
+  { title: 'Optimize Image Upload Caching', description: 'Resize client-side image files before pushing to S3 storage.' },
+  { title: 'Write OpenAPI Spec and Docs', description: 'Document all REST endpoints for external developer usage.' },
+  { title: 'Set up E2E Playwright Tests', description: 'Add smoke testing on user login and checkout flows.' },
+  { title: 'Localize Platform in Spanish', description: 'Translate UI copy and error strings for global outreach.' },
+  { title: 'Fix CSS Grid Layout on Safari', description: 'Resolve flexbox wrap visual bugs on iOS devices.' }
+];
+
 export const useGameState = () => {
   const [gameState, setGameState] = useState<GameState>(() => {
     // Try to load from localStorage
@@ -726,6 +744,49 @@ export const useGameState = () => {
     });
   }, []);
 
+  // Manual Backlog Replenishment
+  const replenishBacklog = useCallback(() => {
+    setGameState(prev => {
+      if (prev.gamePhase === 'intro' || prev.gamePhase === 'game_over') {
+        return prev;
+      }
+
+      const poolIndex = Math.floor(Math.random() * BACKLOG_CARD_POOL.length);
+      const template = BACKLOG_CARD_POOL[poolIndex];
+
+      const effort = {
+        analysis: Math.floor(Math.random() * 3) + 1,
+        development: Math.floor(Math.random() * 5) + 2,
+        testing: Math.floor(Math.random() * 3) + 1
+      };
+
+      const newCardId = `card_replenished_${generateId()}`;
+      const newCard: Card = {
+        id: newCardId,
+        title: template.title,
+        description: template.description,
+        type: 'standard',
+        columnId: 'backlog',
+        effort,
+        remainingEffort: { ...effort },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: prev.day,
+        completedAt: null,
+        startedAt: null,
+        history: [{ day: prev.day, columnId: 'backlog' }]
+      };
+
+      return {
+        ...prev,
+        cards: [...prev.cards, newCard],
+        eventLogs: [...prev.eventLogs, `[Backlog] Replenished backlog with: "${newCard.title}" (Effort: A${effort.analysis}, D${effort.development}, T${effort.testing})`]
+      };
+    });
+  }, []);
+
+
   return {
     gameState,
     startGame,
@@ -737,5 +798,6 @@ export const useGameState = () => {
     startNextDay,
     setWipLimit,
     renameColumn,
+    replenishBacklog,
   };
 };

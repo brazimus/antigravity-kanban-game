@@ -193,4 +193,36 @@ describe('useGameState Hook', () => {
     expect(avatarAfterReset!.remainingCapacity).toBe(avatar.currentRoll);
     expect(avatarAfterReset!.workedOnCardIdsToday.length).toBe(0);
   });
+
+  it('should manually replenish the backlog with random card', () => {
+    const { result } = renderHook(() => useGameState());
+
+    act(() => {
+      result.current.startGame();
+    });
+
+    const initialCardCount = result.current.gameState.cards.length;
+    expect(initialCardCount).toBe(6);
+
+    act(() => {
+      result.current.replenishBacklog();
+    });
+
+    expect(result.current.gameState.cards.length).toBe(initialCardCount + 1);
+    const newCard = result.current.gameState.cards[result.current.gameState.cards.length - 1];
+
+    expect(newCard.columnId).toBe('backlog');
+    expect(newCard.type).toBe('standard');
+    expect(newCard.effort.analysis).toBeGreaterThanOrEqual(1);
+    expect(newCard.effort.analysis).toBeLessThanOrEqual(3);
+    expect(newCard.effort.development).toBeGreaterThanOrEqual(2);
+    expect(newCard.effort.development).toBeLessThanOrEqual(6);
+    expect(newCard.effort.testing).toBeGreaterThanOrEqual(1);
+    expect(newCard.effort.testing).toBeLessThanOrEqual(3);
+
+    // Verify event logs updated
+    const logEntry = result.current.gameState.eventLogs[result.current.gameState.eventLogs.length - 1];
+    expect(logEntry).toContain('[Backlog] Replenished backlog with:');
+  });
 });
+

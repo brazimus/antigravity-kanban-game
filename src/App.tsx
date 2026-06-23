@@ -17,7 +17,8 @@ function App() {
     resetDailyWork,
     moveCard,
     endDay,
-    startNextDay
+    startNextDay,
+    replenishBacklog
   } = useGameState();
 
   const [activeTab, setActiveTab] = useState<'board' | 'metrics'>('board');
@@ -248,6 +249,7 @@ function App() {
                     onAllocateCapacity={allocateCapacity}
                     onMoveCard={moveCard}
                     gamePhase={gameState.gamePhase}
+                    onReplenishBacklog={replenishBacklog}
                   />
                 </div>
 

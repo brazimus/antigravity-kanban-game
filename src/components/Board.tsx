@@ -11,6 +11,7 @@ interface BoardProps {
   onAllocateCapacity: (avatarId: string, cardId: string) => void;
   onMoveCard: (cardId: string, targetColumnId: string) => { success: boolean; errorMessage: string };
   gamePhase: string;
+  onReplenishBacklog: () => void;
 }
 
 export const Board: React.FC<BoardProps> = ({
@@ -20,7 +21,8 @@ export const Board: React.FC<BoardProps> = ({
   pairingAllowed,
   onAllocateCapacity,
   onMoveCard,
-  gamePhase
+  gamePhase,
+  onReplenishBacklog
 }) => {
   return (
     <div className="kanban-board-container" style={{
@@ -85,6 +87,25 @@ export const Board: React.FC<BoardProps> = ({
                   {cardCount}{column.wipLimit !== null ? ` / ${column.wipLimit}` : ''}
                 </span>
               </div>
+              
+              {/* Manual Backlog Replenishment button */}
+              {column.id === 'backlog' && gamePhase !== 'intro' && gamePhase !== 'game_over' && (
+                <button
+                  onClick={onReplenishBacklog}
+                  className="btn btn-secondary"
+                  style={{
+                    width: '100%',
+                    padding: '6px 10px',
+                    fontSize: '0.75rem',
+                    marginTop: '8px',
+                    gap: '4px',
+                    borderRadius: 'var(--radius-sm)',
+                    justifyContent: 'center'
+                  }}
+                >
+                  + Replenish Backlog
+                </button>
+              )}
               
               {/* WIP Limit Alert Banner */}
               {isWipExceeded && (
