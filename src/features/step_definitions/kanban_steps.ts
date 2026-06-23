@@ -147,7 +147,7 @@ export const registerSteps = (runner: BddRunner) => {
     expect(context.result.current.gameState.currentDayEvent?.title).toContain('Trade Show');
   });
 
-  runner.register(/^(\d+) child cards are created in the Ready column$/, (context, count) => {
+  runner.register(/^(\d+) child(?: story)? cards are created in the Ready column$/, (context, count) => {
     const epicCard = context.result.current.gameState.cards.find((c: any) => c.type === 'epic')!;
     context.epicId = epicCard.id;
     const children = context.result.current.gameState.cards.filter((c: any) => c.parentEpicId === epicCard.id);
@@ -739,5 +739,237 @@ export const registerSteps = (runner: BddRunner) => {
 
   runner.register(/^the game configuration reflects the custom self-testing multiplier of (\d+\.\d+)$/, (context, multiplier) => {
     expect(context.result.current.gameState.config.selfTestingMultiplier).toBe(Number(multiplier));
+  });
+
+  // ==========================================
+  // Phase 2: Core Game Mechanics Step Definitions
+  // ==========================================
+
+  runner.register(/^"(.*)" has rolled (\d+) capacity points$/, (context, avatarName, points) => {
+    act(() => {
+      const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+      expect(avatar).toBeDefined();
+      avatar.currentRoll = Number(points);
+      avatar.remainingCapacity = Number(points);
+    });
+  });
+
+  runner.register(/^"(.*)" allocates capacity to Card A$/, (context, avatarName) => {
+    const cards = context.result.current.gameState.cards.filter((c: any) => c.columnId === 'analysis');
+    expect(cards.length).toBeGreaterThanOrEqual(2);
+    const cardA = cards[0];
+    context.cardAId = cardA.id;
+    context.cardAInitialEffort = cardA.remainingEffort.analysis;
+    act(() => {
+      cardA.remainingEffort.analysis = 1;
+      context.result.current.allocateCapacity(avatarName, cardA.id, 'analysis');
+    });
+  });
+
+  runner.register(/^"(.*)" allocates capacity to Card B$/, (context, avatarName) => {
+    const cards = context.result.current.gameState.cards.filter((c: any) => c.columnId === 'analysis');
+    expect(cards.length).toBeGreaterThanOrEqual(2);
+    const cardB = cards[1];
+    context.cardBId = cardB.id;
+    act(() => {
+      cardB.remainingEffort.analysis = 1;
+      context.result.current.allocateCapacity(avatarName, cardB.id, 'analysis');
+    });
+  });
+
+  runner.register(/^"(.*)" incurs a 1-point context-switch penalty$/, (context, avatarName) => {
+    const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+    expect(avatar.remainingCapacity).toBe(3);
+  });
+
+  runner.register(/^"(.*)"'s remaining capacity is reduced by 1 additional point$/, (context, avatarName) => {
+    const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+    expect(avatar.remainingCapacity).toBe(3);
+  });
+
+  runner.register(/^Swarming accelerator is active$/, (context) => {
+    act(() => {
+      context.result.current.startNextDay({ swarmingActive: true });
+    });
+    expect(context.result.current.gameState.swarmingActive).toBe(true);
+  });
+
+  runner.register(/^no context-switch penalty is applied$/, (context) => {
+    const alice = context.result.current.gameState.avatars.find((a: any) => a.id === 'alice');
+    expect(alice.remainingCapacity).toBe(4);
+  });
+
+  runner.register(/^"(.*)"'s capacity is spent at full efficiency$/, (context, avatarName) => {
+    const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+    expect(avatar.remainingCapacity).toBe(4);
+  });
+
+  runner.register(/^WIP Limits accelerator is active with pairing allowed$/, (context) => {
+    act(() => {
+      context.result.current.startNextDay({ wipLimitsActive: true });
+    });
+    expect(context.result.current.gameState.wipLimitsActive).toBe(true);
+    expect(context.result.current.gameState.pairingAllowed).toBe(true);
+  });
+
+  runner.register(/^"(.*)" is assigned to Card A in Development$/, (context, avatarName) => {
+    act(() => {
+      const cardA = context.result.current.gameState.cards.find((c: any) => c.columnId === 'analysis')!;
+      cardA.columnId = 'development';
+      cardA.effort = { analysis: 0, development: 6, testing: 3 };
+      cardA.remainingEffort = { analysis: 0, development: 1, testing: 3 }; // only 1 dev effort remaining
+      cardA.assignedAvatars = [avatarName];
+      context.cardAId = cardA.id;
+      context.cardAInitialDevEffort = 1;
+      
+      const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+      avatar.currentRoll = 6;
+      avatar.remainingCapacity = 6;
+      avatar.workedOnCardIdsToday = [cardA.id];
+      avatar.assignedCardId = cardA.id;
+    });
+  });
+
+  runner.register(/^"(.*)" allocates capacity as a helper on Card A$/, (context, helperName) => {
+    act(() => {
+      const bob = context.result.current.gameState.avatars.find((a: any) => a.id === helperName);
+      bob.currentRoll = 4;
+      bob.remainingCapacity = 4;
+      context.result.current.allocateCapacity(helperName, context.cardAId, 'development');
+    });
+  });
+
+  runner.register(/^"(.*)"'s capacity is consumed at 2:1 rate$/, (context, avatarName) => {
+    const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+    expect(avatar.remainingCapacity).toBe(2); // Started at 4, spent 2 capacity points
+  });
+
+  runner.register(/^Card A gains half of Bob's spent capacity as progress$/, (context) => {
+    const cardA = context.result.current.gameState.cards.find((c: any) => c.id === context.cardAId);
+    expect(cardA.remainingEffort.development).toBe(0); // Progressed by 1
+  });
+
+  runner.register(/^dice have been rolled$/, (context) => {
+    act(() => {
+      context.result.current.rollDice();
+    });
+    expect(context.result.current.gameState.gamePhase).toBe('dice_rolled');
+  });
+
+  runner.register(/^"(.*)" allocates (\d+) capacity to Card A$/, (context, avatarName, _points) => {
+    const cardA = context.result.current.gameState.cards.find((c: any) => c.columnId === 'analysis')!;
+    context.cardAId = cardA.id;
+    act(() => {
+      const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+      avatar.remainingCapacity = 5;
+      cardA.remainingEffort.analysis = 3;
+      
+      const snapshot = context.result.current.gameState.snapshotAtDayStart;
+      if (snapshot) {
+        const snapCard = snapshot.cards.find((c: any) => c.id === cardA.id);
+        if (snapCard) {
+          snapCard.remainingEffort.analysis = 3;
+        }
+        const snapAvatar = snapshot.avatars.find((a: any) => a.id === avatarName);
+        if (snapAvatar) {
+          snapAvatar.remainingCapacity = 5;
+        }
+      }
+      
+      context.result.current.allocateCapacity(avatarName, cardA.id, 'analysis');
+    });
+  });
+
+  runner.register(/^the player resets daily work$/, (context) => {
+    act(() => {
+      context.result.current.resetDailyWork();
+    });
+  });
+
+  runner.register(/^all capacity allocations are reverted$/, (_context) => {
+    // Asserted in subsequent steps
+  });
+
+  runner.register(/^"(.*)"'s remaining capacity is restored to rolled value$/, (context, avatarName) => {
+    const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarName);
+    expect(avatar.remainingCapacity).toBe(5);
+  });
+
+  runner.register(/^Card A's remaining effort is restored to pre-allocation value$/, (context) => {
+    const cardA = context.result.current.gameState.cards.find((c: any) => c.id === context.cardAId);
+    expect(cardA.remainingEffort.analysis).toBe(3);
+  });
+
+  runner.register(/^a large Epic card exists in the Ready column$/, (context) => {
+    act(() => {
+      const epicCard = {
+        id: 'epic_large_test',
+        title: 'Trade Show Epic',
+        description: 'A large epic card for testing splits',
+        type: 'epic' as const,
+        columnId: 'ready',
+        effort: { analysis: 0, development: 12, testing: 6 },
+        remainingEffort: { analysis: 0, development: 12, testing: 6 },
+        assignedAvatars: [],
+        isBlocked: false,
+        failedQACount: 0,
+        createdAt: context.result.current.gameState.day,
+        completedAt: null,
+        startedAt: null,
+        history: [],
+        isEpic: true
+      };
+      context.result.current.gameState.cards.push(epicCard);
+      context.epicId = epicCard.id;
+    });
+  });
+
+  runner.register(/^the player splits the Epic$/, (context) => {
+    act(() => {
+      context.result.current.splitEpic(context.epicId);
+    });
+  });
+
+  runner.register(/^each child card has proportional effort from the parent$/, (context) => {
+    const children = context.result.current.gameState.cards.filter((c: any) => c.parentEpicId === context.epicId);
+    children.forEach((child: any) => {
+      expect(child.effort.development).toBe(4);
+      expect(child.effort.testing).toBe(2);
+    });
+  });
+
+  runner.register(/^child cards are linked to the parent Epic via parentEpicId$/, (context) => {
+    const children = context.result.current.gameState.cards.filter((c: any) => c.parentEpicId === context.epicId);
+    expect(children.length).toBe(3);
+  });
+
+  runner.register(/^the parent Epic moves to the epic_pool column$/, (context) => {
+    const epic = context.result.current.gameState.cards.find((c: any) => c.id === context.epicId)!;
+    expect(epic.columnId).toBe('epic_pool');
+  });
+
+  runner.register(/^Smaller Batches accelerator is active$/, (context) => {
+    act(() => {
+      context.result.current.startNextDay({ smallerBatchesActive: true });
+    });
+    expect(context.result.current.gameState.smallerBatchesActive).toBe(true);
+  });
+
+  runner.register(/^the backlog is replenished with a new card with Math\.random returning (\d+\.\d+)$/, (context, randVal) => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(Number(randVal));
+    context.beforeCardCount = context.result.current.gameState.cards.length;
+    act(() => {
+      context.result.current.replenishBacklog();
+    });
+    randomSpy.mockRestore();
+  });
+
+  runner.register(/^the new card's effort values should be halved$/, (context) => {
+    const cards = context.result.current.gameState.cards;
+    expect(cards.length).toBe(context.beforeCardCount + 1);
+    const newCard = cards[cards.length - 1];
+    expect(newCard.effort.analysis).toBe(1);
+    expect(newCard.effort.development).toBe(2);
+    expect(newCard.effort.testing).toBe(1);
   });
 };

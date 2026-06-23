@@ -176,6 +176,55 @@ const featureContent = `Feature: Kanban Simulation Flow Accelerators and Scenari
   Scenario: Admin Customizes Self-Testing Multiplier
     Given a new game is started with custom self-testing multiplier of 3.0
     Then the game configuration reflects the custom self-testing multiplier of 3.0
+
+  Scenario: Context Switch Penalty on Card Change
+    Given a new game is started
+    And "alice" has rolled 6 capacity points
+    And "alice" allocates capacity to Card A
+    When "alice" allocates capacity to Card B
+    Then "alice" incurs a 1-point context-switch penalty
+    And "alice"'s remaining capacity is reduced by 1 additional point
+
+  Scenario: Swarming Eliminates Context Switch Penalty
+    Given a new game is started
+    And Swarming accelerator is active
+    And "alice" has rolled 6 capacity points
+    And "alice" allocates capacity to Card A
+    When "alice" allocates capacity to Card B
+    Then no context-switch penalty is applied
+    And "alice"'s capacity is spent at full efficiency
+
+  Scenario: Pairing Helper Mechanics at 2:1 Cost
+    Given a new game is started
+    And WIP Limits accelerator is active with pairing allowed
+    And "alice" is assigned to Card A in Development
+    When "bob" allocates capacity as a helper on Card A
+    Then "bob"'s capacity is consumed at 2:1 rate
+    And Card A gains half of Bob's spent capacity as progress
+
+  Scenario: Reset Daily Work Reverts All Allocations
+    Given a new game is started
+    And dice have been rolled
+    And "alice" allocates 3 capacity to Card A
+    When the player resets daily work
+    Then all capacity allocations are reverted
+    And "alice"'s remaining capacity is restored to rolled value
+    And Card A's remaining effort is restored to pre-allocation value
+
+  Scenario: Manual Epic Splitting by Player
+    Given a new game is started
+    And a large Epic card exists in the Ready column
+    When the player splits the Epic
+    Then 3 child story cards are created in the Ready column
+    And each child card has proportional effort from the parent
+    And child cards are linked to the parent Epic via parentEpicId
+    And the parent Epic moves to the epic_pool column
+
+  Scenario: Smaller Batches Halves Backlog Effort
+    Given a new game is started
+    And Smaller Batches accelerator is active
+    When the backlog is replenished with a new card with Math.random returning 0.5
+    Then the new card's effort values should be halved
 `;
 
 
