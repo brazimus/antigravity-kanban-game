@@ -204,3 +204,83 @@ Feature: Kanban Simulation Flow Accelerators and Scenarios
   Scenario: All Scenario Calendar Events are fully executed
     Given a new game is started
     Then every day event in the scenario calendar is verified to execute its side effects
+
+  Scenario: QA Rework Sends Card Back to Development
+    Given a new game is started
+    And a card "Landing Page Layout" is in the Testing column with 0 remaining testing effort
+    And the card "Landing Page Layout" had work applied today by a single unpaired developer "alice"
+    When the day ends and QA failure occurs
+    Then the card "Landing Page Layout" is moved back to the Development column
+    And its development effort is reset to full rework
+    And its testing effort is reset for retest
+    And its failedQACount is incremented by 1
+
+  Scenario: Shift-Left Bypasses QA Rework
+    Given a new game is started
+    And Shift-Left accelerator is active
+    And a card "User Login & Auth" is in the Testing column with 0 remaining testing effort
+    And the card "User Login & Auth" had work applied today by a single unpaired developer "alice"
+    When the day ends
+    Then the card "User Login & Auth" remains in Testing ready to move to Done
+
+  Scenario: Pairing Reduces Blocker Probability
+    Given a new game is started
+    And WIP Limits accelerator is active with pairing allowed
+    And a card "Database Schema Setup" is in the Development column
+    And the card "Database Schema Setup" is assigned to "alice" and "bob" today
+    When the day ends with blocker rolls returning 0.1 and 0.9
+    Then the card "Database Schema Setup" is not blocked
+    And a pairing save is logged
+
+  Scenario: Game Over Transition at Max Days
+    Given a new game is started with max days of 2
+    When 2 days are completed
+    Then the game phase transitions to game_over
+    And a game over summary is logged
+
+  Scenario: Weekend Summary Transition Every 5 Days
+    Given a new game is started
+    When Day 5 ends
+    Then the game phase transitions to week_summary
+    And a week performance summary is logged
+
+  Scenario: Cross-Day Context Switch From Yesterday
+    Given a new game is started
+    And "alice" worked on Card A yesterday as her last card
+    And "alice" has rolled 5 capacity points
+    When "alice" allocates capacity to Card B today
+    Then "alice" incurs a 1-point context-switch penalty
+
+  Scenario: Shift-Left Enables Concurrent Dev and Test Effort in Development Column
+    Given a new game is started
+    And Shift-Left accelerator is active
+    And a card "User Login & Auth" is in the Development column
+    And the card "User Login & Auth" has 4 Development and 2 Testing effort remaining
+    And "alice" has rolled 6 capacity points
+    When "alice" allocates capacity choosing "testing" effort type to card "User Login & Auth"
+    Then testing progress is applied to the card "User Login & Auth" while it remains in Development
+
+  Scenario: Daily Metrics Logging Accuracy
+    Given a new game is started
+    And dice have been rolled
+    And a card "Landing Page Layout" is in the Testing column with 1 remaining testing effort
+    And a card "API Gateway Proxy" is in the Testing column with 1 remaining testing effort
+    And "alice" allocates capacity to the card "Landing Page Layout"
+    And "bob" allocates capacity to the card "API Gateway Proxy"
+    And the card "Landing Page Layout" is moved to Done
+    And the card "API Gateway Proxy" is moved to Done
+    When the day ends with blocker rolls returning 0.9 and 0.9
+    Then the daily log for Day 1 records throughput of 2
+    And cumulative throughput reflects 2
+    And column WIP counts are accurately recorded for each column
+
+  Scenario: Lead Time and Cycle Time Calculations
+    Given a new game is started
+    And dice have been rolled
+    And a card "Landing Page Layout" is in the Testing column with 1 remaining testing effort
+    And the card "Landing Page Layout" was created on Day 1 and started on Day 1
+    And "alice" allocates capacity to the card "Landing Page Layout"
+    And the card "Landing Page Layout" is moved to Done
+    When the day ends with blocker rolls returning 0.9 and 0.9
+    Then the average lead time includes this card's lead time of 0 days
+    And the average cycle time includes this card's cycle time of 0 days

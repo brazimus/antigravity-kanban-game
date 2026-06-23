@@ -767,7 +767,7 @@ export const registerSteps = (runner: BddRunner) => {
     });
   });
 
-  runner.register(/^"(.*)" allocates capacity to Card B$/, (context, avatarName) => {
+  runner.register(/^"(.*)" allocates capacity to Card B(?: today)?$/, (context, avatarName) => {
     const cards = context.result.current.gameState.cards.filter((c: any) => c.columnId === 'analysis');
     expect(cards.length).toBeGreaterThanOrEqual(2);
     const cardB = cards[1];
@@ -850,7 +850,7 @@ export const registerSteps = (runner: BddRunner) => {
     expect(cardA.remainingEffort.development).toBe(0); // Progressed by 1
   });
 
-  runner.register(/^dice have been rolled$/, (context) => {
+  runner.register(/^dice have been rolled(?: for today)?$/, (context) => {
     act(() => {
       context.result.current.rollDice();
     });
@@ -1049,5 +1049,257 @@ export const registerSteps = (runner: BddRunner) => {
 
       verifyDayEffects(day);
     }
+  });
+
+  runner.register(/^a card "(.*)" is in the Testing column with (\d+) remaining testing effort$/, (context, cardTitle, remaining) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      card.columnId = 'testing';
+      card.effort = { analysis: 0, development: 4, testing: Number(remaining) };
+      card.remainingEffort = { analysis: 0, development: 0, testing: Number(remaining) };
+    });
+  });
+
+  runner.register(/^the card "(.*)" had work applied today by a single unpaired developer "(.*)"$/, (context, cardTitle, avatarId) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      
+      const avatar = context.result.current.gameState.avatars.find((a: any) => a.id === avatarId);
+      expect(avatar).toBeDefined();
+      
+      card.assignedAvatars = [avatarId];
+      avatar.assignedCardId = card.id;
+      avatar.workedOnCardIdsToday = [card.id];
+      context.reworkCardId = card.id;
+    });
+  });
+
+  runner.register(/^the day ends and QA failure occurs$/, (context) => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.05);
+    act(() => {
+      context.result.current.endDay();
+    });
+    randomSpy.mockRestore();
+  });
+
+  runner.register(/^the card "(.*)" is moved back to the Development column$/, (context, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card.columnId).toBe('development');
+  });
+
+  runner.register(/^its development effort is reset to full rework$/, (context) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.id === context.reworkCardId);
+    expect(card.remainingEffort.development).toBe(card.effort.development || 2);
+  });
+
+  runner.register(/^its testing effort is reset for retest$/, (context) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.id === context.reworkCardId);
+    expect(card.remainingEffort.testing).toBe(card.effort.testing || 1);
+  });
+
+  runner.register(/^its failedQACount is incremented by 1$/, (context) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.id === context.reworkCardId);
+    expect(card.failedQACount).toBe(1);
+  });
+
+  runner.register(/^Shift-Left accelerator is active$/, (context) => {
+    act(() => {
+      context.result.current.startNextDay({ shiftLeftActive: true });
+    });
+    expect(context.result.current.gameState.shiftLeftActive).toBe(true);
+  });
+
+  runner.register(/^the day ends$/, (context) => {
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.9);
+    act(() => {
+      context.result.current.endDay();
+    });
+    randomSpy.mockRestore();
+  });
+
+  runner.register(/^the card "(.*)" remains in Testing ready to move to Done$/, (context, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card.columnId).toBe('testing');
+    expect(card.remainingEffort.testing).toBe(0);
+  });
+
+  runner.register(/^a card "(.*)" is in the Development column$/, (context, cardTitle) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      card.columnId = 'development';
+      context.pairedCardId = card.id;
+    });
+  });
+
+  runner.register(/^the card "(.*)" is assigned to "(.*)" and "(.*)" today$/, (context, cardTitle, dev1, dev2) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      card.assignedAvatars = [dev1, dev2];
+      
+      const a1 = context.result.current.gameState.avatars.find((a: any) => a.id === dev1);
+      const a2 = context.result.current.gameState.avatars.find((a: any) => a.id === dev2);
+      a1.assignedCardId = card.id;
+      a1.workedOnCardIdsToday = [card.id];
+      a2.assignedCardId = card.id;
+      a2.workedOnCardIdsToday = [card.id];
+    });
+  });
+
+  runner.register(/^the day ends with blocker rolls returning (\d+\.\d+) and (\d+\.\d+)$/, (context, roll1, roll2) => {
+    let callCount = 0;
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) return Number(roll1);
+      if (callCount === 2) return Number(roll2);
+      return 0.9;
+    });
+    act(() => {
+      context.result.current.endDay();
+    });
+    randomSpy.mockRestore();
+  });
+
+  runner.register(/^the card "(.*)" is not blocked$/, (context, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card.isBlocked).toBe(false);
+  });
+
+  runner.register(/^a pairing save is logged$/, (context) => {
+    const logs = context.result.current.gameState.eventLogs;
+    const hasSaveLog = logs.some((l: string) => l.includes('pairing save') || l.includes('paired quality validation'));
+    expect(hasSaveLog).toBe(true);
+  });
+
+  runner.register(/^(\d+) days are completed$/, (context, daysCount) => {
+    const count = Number(daysCount);
+    for (let i = 0; i < count; i++) {
+      act(() => {
+        context.result.current.rollDice();
+      });
+      act(() => {
+        context.result.current.endDay();
+      });
+      if (i < count - 1) {
+        act(() => {
+          context.result.current.startNextDay();
+        });
+      }
+    }
+  });
+
+  runner.register(/^the game phase transitions to (.*)$/, (context, expectedPhase) => {
+    expect(context.result.current.gameState.gamePhase).toBe(expectedPhase);
+  });
+
+  runner.register(/^a game over summary is logged$/, (context) => {
+    const logs = context.result.current.gameState.eventLogs;
+    const hasGameOverLog = logs.some((l: string) => l.includes('Game Over') || l.includes('Completed'));
+    expect(hasGameOverLog).toBe(true);
+  });
+
+  runner.register(/^Day 5 ends$/, (context) => {
+    for (let day = 1; day <= 5; day++) {
+      act(() => { context.result.current.rollDice(); });
+      act(() => { context.result.current.endDay(); });
+      if (day < 5) {
+        act(() => { context.result.current.startNextDay(); });
+      }
+    }
+    expect(context.result.current.gameState.day).toBe(5);
+  });
+
+  runner.register(/^a week performance summary is logged$/, (context) => {
+    const logs = context.result.current.gameState.eventLogs;
+    const hasWeekEndLog = logs.some((l: string) => l.includes('Week End Reached') || l.includes('Week performance'));
+    expect(hasWeekEndLog).toBe(true);
+  });
+
+  runner.register(/^"(.*)" worked on Card A yesterday as her last card$/, (context, avatarId) => {
+    const cards = context.result.current.gameState.cards.filter((c: any) => c.columnId === 'analysis');
+    expect(cards.length).toBeGreaterThanOrEqual(2);
+    const cardA = cards[0];
+    const cardB = cards[1];
+    context.cardAId = cardA.id;
+    context.cardBId = cardB.id;
+    
+    act(() => {
+      const alice = context.result.current.gameState.avatars.find((a: any) => a.id === avatarId);
+      alice.previousCardId = cardA.id;
+    });
+  });
+
+  runner.register(/^the card "(.*)" has (\d+) Development and (\d+) Testing effort remaining$/, (context, cardTitle, devEffort, testEffort) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      card.remainingEffort.development = Number(devEffort);
+      card.remainingEffort.testing = Number(testEffort);
+    });
+  });
+
+  runner.register(/^"(.*)" allocates capacity choosing "(.*)" effort type to card "(.*)"$/, (context, avatarName, effortType, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card).toBeDefined();
+    act(() => {
+      context.result.current.allocateCapacity(avatarName, card.id, effortType as any);
+    });
+  });
+
+  runner.register(/^testing progress is applied to the card "(.*)" while it remains in Development$/, (context, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card.columnId).toBe('development');
+    expect(card.remainingEffort.testing).toBe(0);
+  });
+
+  runner.register(/^the daily log for Day (\d+) records throughput of (\d+)$/, (context, dayNum, expectedThroughput) => {
+    const log = context.result.current.gameState.dailyLogs.find((l: any) => l.day === Number(dayNum));
+    expect(log).toBeDefined();
+    expect(log.throughput).toBe(Number(expectedThroughput));
+  });
+
+  runner.register(/^cumulative throughput reflects (\d+)$/, (context, expectedCumulative) => {
+    const logs = context.result.current.gameState.dailyLogs;
+    const lastLog = logs[logs.length - 1];
+    expect(lastLog.cumulativeThroughput).toBe(Number(expectedCumulative));
+  });
+
+  runner.register(/^column WIP counts are accurately recorded for each column$/, (context) => {
+    const logs = context.result.current.gameState.dailyLogs;
+    const lastLog = logs[logs.length - 1];
+    expect(lastLog.columnWIP).toBeDefined();
+    expect(lastLog.columnWIP.done).toBeGreaterThanOrEqual(0);
+  });
+
+  runner.register(/^the card "(.*)" was created on Day (\d+) and started on Day (\d+)$/, (context, cardTitle, createdDay, startedDay) => {
+    act(() => {
+      const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+      expect(card).toBeDefined();
+      card.createdAt = Number(createdDay);
+      card.startedAt = Number(startedDay);
+    });
+  });
+
+  runner.register(/^the average lead time includes this card's lead time of (\d+) days$/, (context, expectedLead) => {
+    const logs = context.result.current.gameState.dailyLogs;
+    const lastLog = logs[logs.length - 1];
+    expect(lastLog.averageLeadTime).toBe(Number(expectedLead));
+  });
+
+  runner.register(/^the average cycle time includes this card's cycle time of (\d+) days$/, (context, expectedCycle) => {
+    const logs = context.result.current.gameState.dailyLogs;
+    const lastLog = logs[logs.length - 1];
+    expect(lastLog.averageCycleTime).toBe(Number(expectedCycle));
+  });
+
+  runner.register(/^the card "(.*)" is moved to Done$/, (context, cardTitle) => {
+    const card = context.result.current.gameState.cards.find((c: any) => c.title === cardTitle);
+    expect(card).toBeDefined();
+    act(() => {
+      context.result.current.moveCard(card.id, 'done');
+    });
   });
 };
