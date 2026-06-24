@@ -99,213 +99,243 @@ async function assertSuperAdmin(uid: string) {
 
 // 1. Generate Registration Options
 export const generateRegistrationOptions = onCall(async (request) => {
-  const { userId, email } = request.data as { userId: string; email: string };
-  if (!userId || !email) {
-    throw new HttpsError('invalid-argument', 'Missing userId or email.');
-  }
-
-  const credentials = await dbAdapter.getCredentials(userId);
-
-  const options = await genRegOptions({
-    rpName,
-    rpID: getRpId(request),
-    userID: bufferToBase64Url(Buffer.from(userId)) as any,
-    userName: email,
-    userDisplayName: email,
-    attestationType: 'none',
-    excludeCredentials: credentials.map((c: any) => ({
-      id: base64UrlToBuffer(c.credentialID),
-      type: 'public-key'
-    })),
-    authenticatorSelection: {
-      residentKey: 'required',
-      userVerification: 'preferred'
+  try {
+    const { userId, email } = request.data as { userId: string; email: string };
+    if (!userId || !email) {
+      throw new HttpsError('invalid-argument', 'Missing userId or email.');
     }
-  });
 
-  await saveChallenge(`reg-${userId}`, options.challenge);
+    const credentials = await dbAdapter.getCredentials(userId);
 
-  return { options };
+    const options = await genRegOptions({
+      rpName,
+      rpID: getRpId(request),
+      userID: bufferToBase64Url(Buffer.from(userId)) as any,
+      userName: email,
+      userDisplayName: email,
+      attestationType: 'none',
+      excludeCredentials: credentials.map((c: any) => ({
+        id: base64UrlToBuffer(c.credentialID),
+        type: 'public-key'
+      })),
+      authenticatorSelection: {
+        residentKey: 'required',
+        userVerification: 'preferred'
+      }
+    });
+
+    await saveChallenge(`reg-${userId}`, options.challenge);
+
+    return { options };
+  } catch (err: any) {
+    console.error('Error in generateRegistrationOptions:', err);
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', `generateRegistrationOptions failed: ${err.message || err}`);
+  }
 });
 
 // 2. Verify Registration
 export const verifyRegistration = onCall(async (request) => {
-  const { userId, email, label, credential } = request.data as {
-    userId: string;
-    email: string;
-    label: string;
-    credential: any;
-  };
-
-  if (!userId || !email || !label || !credential) {
-    throw new HttpsError('invalid-argument', 'Missing parameters.');
-  }
-
-  const expectedChallenge = await getChallenge(`reg-${userId}`);
-  if (!expectedChallenge) {
-    throw new HttpsError('failed-precondition', 'Challenge expired or not found.');
-  }
-
-  let verification;
   try {
-    verification = await verifyRegistrationResponse({
-      response: credential,
-      expectedChallenge,
-      expectedOrigin: allowedOrigins,
-      expectedRPID: getRpId(request)
-    });
-  } catch (err: any) {
-    throw new HttpsError('invalid-argument', err.message || 'Signature verification failed.');
-  }
-
-  const { verified, registrationInfo } = verification;
-  if (!verified || !registrationInfo) {
-    throw new HttpsError('invalid-argument', 'WebAuthn verification failed.');
-  }
-
-  const { credentialID, credentialPublicKey, counter } = registrationInfo;
-
-  await dbAdapter.saveCredential(userId, {
-    credentialID: bufferToBase64Url(credentialID),
-    credentialPublicKey: bufferToBase64Url(credentialPublicKey),
-    counter,
-    transports: credential.response.transports
-  });
-
-  let user = await dbAdapter.getUserById(userId);
-  let backupPassphrase = '';
-
-  if (!user) {
-    user = {
-      uid: userId,
-      email,
-      roles: { admin: true, superAdmin: email.toLowerCase() === 'admin@example.com' }
+    const { userId, email, label, credential } = request.data as {
+      userId: string;
+      email: string;
+      label: string;
+      credential: any;
     };
+
+    if (!userId || !email || !label || !credential) {
+      throw new HttpsError('invalid-argument', 'Missing parameters.');
+    }
+
+    const expectedChallenge = await getChallenge(`reg-${userId}`);
+    if (!expectedChallenge) {
+      throw new HttpsError('failed-precondition', 'Challenge expired or not found.');
+    }
+
+    let verification;
+    try {
+      verification = await verifyRegistrationResponse({
+        response: credential,
+        expectedChallenge,
+        expectedOrigin: allowedOrigins,
+        expectedRPID: getRpId(request)
+      });
+    } catch (err: any) {
+      throw new HttpsError('invalid-argument', err.message || 'Signature verification failed.');
+    }
+
+    const { verified, registrationInfo } = verification;
+    if (!verified || !registrationInfo) {
+      throw new HttpsError('invalid-argument', 'WebAuthn verification failed.');
+    }
+
+    const { credentialID, credentialPublicKey, counter } = registrationInfo;
+
+    await dbAdapter.saveCredential(userId, {
+      credentialID: bufferToBase64Url(credentialID),
+      credentialPublicKey: bufferToBase64Url(credentialPublicKey),
+      counter,
+      transports: credential.response.transports
+    });
+
+    let user = await dbAdapter.getUserById(userId);
+    let backupPassphrase = '';
+
+    if (!user) {
+      user = {
+        uid: userId,
+        email,
+        roles: { admin: true, superAdmin: email.toLowerCase() === 'admin@example.com' }
+      };
+    }
+
+    if (!user.backupPassphraseHash) {
+      backupPassphrase = generateXkcdPassphrase();
+      user.backupPassphraseHash = hashPassphrase(backupPassphrase);
+    }
+
+    await dbAdapter.saveUser(user);
+
+    return { success: true, backupPassphrase };
+  } catch (err: any) {
+    console.error('Error in verifyRegistration:', err);
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', `verifyRegistration failed: ${err.message || err}`);
   }
-
-  if (!user.backupPassphraseHash) {
-    backupPassphrase = generateXkcdPassphrase();
-    user.backupPassphraseHash = hashPassphrase(backupPassphrase);
-  }
-
-  await dbAdapter.saveUser(user);
-
-  return { success: true, backupPassphrase };
 });
 
 // 3. Generate Authentication Options
 export const generateAuthenticationOptions = onCall(async (request) => {
-  const { email } = request.data as { email: string };
-  if (!email) {
-    throw new HttpsError('invalid-argument', 'Missing email.');
+  try {
+    const { email } = request.data as { email: string };
+    if (!email) {
+      throw new HttpsError('invalid-argument', 'Missing email.');
+    }
+
+    const user = await dbAdapter.getUserByEmail(email);
+    if (!user) {
+      throw new HttpsError('not-found', 'No admin found with this email.');
+    }
+
+    const credentials = await dbAdapter.getCredentials(user.uid);
+    if (credentials.length === 0) {
+      throw new HttpsError('failed-precondition', 'No passkeys registered for this account.');
+    }
+
+    const options = await genAuthOptions({
+      rpID: getRpId(request),
+      allowCredentials: credentials.map((c: any) => ({
+        id: base64UrlToBuffer(c.credentialID),
+        type: 'public-key',
+        transports: c.transports as any
+      })),
+      userVerification: 'preferred'
+    });
+
+    await saveChallenge(`auth-${email.toLowerCase()}`, options.challenge);
+
+    return { options };
+  } catch (err: any) {
+    console.error('Error in generateAuthenticationOptions:', err);
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', `generateAuthenticationOptions failed: ${err.message || err}`);
   }
-
-  const user = await dbAdapter.getUserByEmail(email);
-  if (!user) {
-    throw new HttpsError('not-found', 'No admin found with this email.');
-  }
-
-  const credentials = await dbAdapter.getCredentials(user.uid);
-  if (credentials.length === 0) {
-    throw new HttpsError('failed-precondition', 'No passkeys registered for this account.');
-  }
-
-  const options = await genAuthOptions({
-    rpID: getRpId(request),
-    allowCredentials: credentials.map((c: any) => ({
-      id: base64UrlToBuffer(c.credentialID),
-      type: 'public-key',
-      transports: c.transports as any
-    })),
-    userVerification: 'preferred'
-  });
-
-  await saveChallenge(`auth-${email.toLowerCase()}`, options.challenge);
-
-  return { options };
 });
 
 // 4. Verify Authentication Signature
 export const verifyAuthentication = onCall(async (request) => {
-  const { email, assertion } = request.data as { email: string; assertion: any };
-  if (!email || !assertion) {
-    throw new HttpsError('invalid-argument', 'Missing parameters.');
-  }
-
-  const user = await dbAdapter.getUserByEmail(email);
-  if (!user) {
-    throw new HttpsError('not-found', 'User not found.');
-  }
-
-  const expectedChallenge = await getChallenge(`auth-${email.toLowerCase()}`);
-  if (!expectedChallenge) {
-    throw new HttpsError('failed-precondition', 'Challenge expired or not found.');
-  }
-
-  const cred = await dbAdapter.getCredentialById(user.uid, assertion.id);
-  if (!cred) {
-    throw new HttpsError('not-found', 'Credential key not found.');
-  }
-
-  let verification;
   try {
-    verification = await verifyAuthenticationResponse({
-      response: assertion,
-      expectedChallenge,
-      expectedOrigin: allowedOrigins,
-      expectedRPID: getRpId(request),
-      authenticator: {
-        credentialID: base64UrlToBuffer(cred.credentialID),
-        credentialPublicKey: base64UrlToBuffer(cred.credentialPublicKey),
-        counter: cred.counter
-      }
+    const { email, assertion } = request.data as { email: string; assertion: any };
+    if (!email || !assertion) {
+      throw new HttpsError('invalid-argument', 'Missing parameters.');
+    }
+
+    const user = await dbAdapter.getUserByEmail(email);
+    if (!user) {
+      throw new HttpsError('not-found', 'User not found.');
+    }
+
+    const expectedChallenge = await getChallenge(`auth-${email.toLowerCase()}`);
+    if (!expectedChallenge) {
+      throw new HttpsError('failed-precondition', 'Challenge expired or not found.');
+    }
+
+    const cred = await dbAdapter.getCredentialById(user.uid, assertion.id);
+    if (!cred) {
+      throw new HttpsError('not-found', 'Credential key not found.');
+    }
+
+    let verification;
+    try {
+      verification = await verifyAuthenticationResponse({
+        response: assertion,
+        expectedChallenge,
+        expectedOrigin: allowedOrigins,
+        expectedRPID: getRpId(request),
+        authenticator: {
+          credentialID: base64UrlToBuffer(cred.credentialID),
+          credentialPublicKey: base64UrlToBuffer(cred.credentialPublicKey),
+          counter: cred.counter
+        }
+      });
+    } catch (err: any) {
+      throw new HttpsError('invalid-argument', err.message || 'Signature assertion failed.');
+    }
+
+    const { verified, authenticationInfo } = verification;
+    if (!verified || !authenticationInfo) {
+      throw new HttpsError('invalid-argument', 'Assertion verification failed.');
+    }
+
+    // Update key counter
+    cred.counter = authenticationInfo.newCounter;
+    await dbAdapter.saveCredential(user.uid, cred);
+
+    // Generate Firebase custom auth token with claims
+    const customToken = await admin.auth().createCustomToken(user.uid, {
+      admin: true,
+      superAdmin: user.roles.superAdmin
     });
+
+    return { success: true, customToken };
   } catch (err: any) {
-    throw new HttpsError('invalid-argument', err.message || 'Signature assertion failed.');
+    console.error('Error in verifyAuthentication:', err);
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', `verifyAuthentication failed: ${err.message || err}`);
   }
-
-  const { verified, authenticationInfo } = verification;
-  if (!verified || !authenticationInfo) {
-    throw new HttpsError('invalid-argument', 'Assertion verification failed.');
-  }
-
-  // Update key counter
-  cred.counter = authenticationInfo.newCounter;
-  await dbAdapter.saveCredential(user.uid, cred);
-
-  // Generate Firebase custom auth token with claims
-  const customToken = await admin.auth().createCustomToken(user.uid, {
-    admin: true,
-    superAdmin: user.roles.superAdmin
-  });
-
-  return { success: true, customToken };
 });
 
 // 5. Verify Backup Recovery Passphrase
 export const verifyBackupPassphrase = onCall(async (request) => {
-  const { email, passphrase } = request.data as { email: string; passphrase: string };
-  if (!email || !passphrase) {
-    throw new HttpsError('invalid-argument', 'Missing parameters.');
+  try {
+    const { email, passphrase } = request.data as { email: string; passphrase: string };
+    if (!email || !passphrase) {
+      throw new HttpsError('invalid-argument', 'Missing parameters.');
+    }
+
+    const user = await dbAdapter.getUserByEmail(email);
+    if (!user) {
+      throw new HttpsError('not-found', 'User not found.');
+    }
+
+    const currentHash = hashPassphrase(passphrase);
+    if (!user.backupPassphraseHash || user.backupPassphraseHash !== currentHash) {
+      throw new HttpsError('permission-denied', 'Invalid recovery passphrase.');
+    }
+
+    // Generate custom token for recovery sign-in
+    const customToken = await admin.auth().createCustomToken(user.uid, {
+      admin: true,
+      superAdmin: user.roles.superAdmin
+    });
+
+    return { success: true, customToken };
+  } catch (err: any) {
+    console.error('Error in verifyBackupPassphrase:', err);
+    if (err instanceof HttpsError) throw err;
+    throw new HttpsError('internal', `verifyBackupPassphrase failed: ${err.message || err}`);
   }
-
-  const user = await dbAdapter.getUserByEmail(email);
-  if (!user) {
-    throw new HttpsError('not-found', 'User not found.');
-  }
-
-  const currentHash = hashPassphrase(passphrase);
-  if (!user.backupPassphraseHash || user.backupPassphraseHash !== currentHash) {
-    throw new HttpsError('permission-denied', 'Invalid recovery passphrase.');
-  }
-
-  // Generate custom token for recovery sign-in
-  const customToken = await admin.auth().createCustomToken(user.uid, {
-    admin: true,
-    superAdmin: user.roles.superAdmin
-  });
-
-  return { success: true, customToken };
 });
 
 // 6. Delete Credential
