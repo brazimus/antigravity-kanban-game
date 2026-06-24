@@ -66,11 +66,43 @@ export class FirebaseAuthAdapter implements AuthAdapter {
   }
 
   private async fetchAdminProfile(uid: string, email: string): Promise<AdminProfile> {
-    const userDocRef = doc(db, 'users', uid);
-    const userSnapshot = await getDoc(userDocRef);
-    
-    if (!userSnapshot.exists()) {
-      // Legacy user has no profile document and no passkeys registered yet
+    try {
+      const userDocRef = doc(db, 'users', uid);
+      const userSnapshot = await getDoc(userDocRef);
+      
+      if (!userSnapshot.exists()) {
+        // Legacy user has no profile document and no passkeys registered yet
+        return {
+          uid,
+          email,
+          roles: { admin: true, superAdmin: false },
+          passkeys: []
+        };
+      }
+
+      const data = userSnapshot.data();
+      const roles = data.roles || { admin: true, superAdmin: false };
+
+      // Fetch credentials list
+      const credentialsRef = collection(db, 'users', uid, 'credentials');
+      const credentialsSnapshot = await getDocs(credentialsRef);
+      const passkeys: PasskeyInfo[] = credentialsSnapshot.docs.map(d => {
+        const c = d.data();
+        return {
+          id: d.id,
+          label: c.label || 'Unnamed Key',
+          createdAt: c.createdAt || new Date().toISOString()
+        };
+      });
+
+      return {
+        uid,
+        email,
+        roles,
+        passkeys
+      };
+    } catch (err: unknown) {
+      console.warn("Failed to fetch admin profile from Firestore, falling back to legacy default:", err);
       return {
         uid,
         email,
@@ -78,28 +110,6 @@ export class FirebaseAuthAdapter implements AuthAdapter {
         passkeys: []
       };
     }
-
-    const data = userSnapshot.data();
-    const roles = data.roles || { admin: true, superAdmin: false };
-
-    // Fetch credentials list
-    const credentialsRef = collection(db, 'users', uid, 'credentials');
-    const credentialsSnapshot = await getDocs(credentialsRef);
-    const passkeys: PasskeyInfo[] = credentialsSnapshot.docs.map(d => {
-      const c = d.data();
-      return {
-        id: d.id,
-        label: c.label || 'Unnamed Key',
-        createdAt: c.createdAt || new Date().toISOString()
-      };
-    });
-
-    return {
-      uid,
-      email,
-      roles,
-      passkeys
-    };
   }
 
   public async sendEmailSignInLink(email: string): Promise<void> {
