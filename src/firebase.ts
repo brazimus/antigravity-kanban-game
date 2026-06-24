@@ -30,4 +30,7 @@ const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
+import { FirebaseAuthAdapter } from './adapters/firebaseAuthAdapter';
+export const authAdapter = new FirebaseAuthAdapter();
+
 export default app;

@@ -1,13 +1,13 @@
 import React, { useState } from 'react';
 import { 
-  signInWithEmailAndPassword, 
-  createUserWithEmailAndPassword, 
-  signInAnonymously 
+  signInAnonymously,
+  isSignInWithEmailLink
 } from 'firebase/auth';
 import { doc, getDoc, setDoc, collection, onSnapshot, deleteDoc, getDocs } from 'firebase/firestore';
-import { auth, db } from '../firebase';
-import { Shield, User, Play, LogIn, UserPlus, Plus, Trash2, ChevronDown, ChevronUp, Settings } from 'lucide-react';
+import { auth, db, authAdapter } from '../firebase';
+import { Shield, User, Play, Plus, Trash2, ChevronDown, ChevronUp, Settings, Key, RefreshCw, Check } from 'lucide-react';
 import type { GameConfig } from '../types';
+import { PasskeyManagement } from './PasskeyManagement';
 
 interface MultiplayerLobbyProps {
   onJoinAsPlayer: (roomCode: string, name: string, color: string, playerId: string) => void;
@@ -47,11 +47,16 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
 
   // Admin Credentials & Whitelist Variables (equivalent to user table fields and lists)
   const [adminEmail, setAdminEmail] = useState('');
-  const [adminPassword, setAdminPassword] = useState('');
+
   const [adminRoomCode, setAdminRoomCode] = useState('');
   const [selectedScenario, setSelectedScenario] = useState('easy_mode');
   const [adminLoggedIn, setAdminLoggedIn] = useState(false);
   const [adminUid, setAdminUid] = useState<string | null>(null);
+  const [adminProfile, setAdminProfile] = useState<any | null>(null);
+  const [showPasskeyManagement, setShowPasskeyManagement] = useState(false);
+  const [useRecoveryPassphrase, setUseRecoveryPassphrase] = useState(false);
+  const [recoveryPassphrase, setRecoveryPassphrase] = useState('');
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [whitelist, setWhitelist] = useState<string[]>([]);
   const [newWhitelistEmail, setNewWhitelistEmail] = useState('');
   const [whitelistError, setWhitelistError] = useState<string | null>(null);
@@ -135,21 +140,67 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
     }
   };
 
+  // Listen for Email Link Sign-In on mount
+  React.useEffect(() => {
+    const checkEmailLink = async () => {
+      if (isSignInWithEmailLink(auth, window.location.href)) {
+        let email = window.localStorage.getItem('emailForSignIn');
+        if (!email) {
+          email = window.prompt('Please enter your email to confirm registration:');
+        }
+        if (email) {
+          setLoading(true);
+          setError(null);
+          try {
+            const profile = await authAdapter.signInWithEmailLink(email.trim(), window.location.href);
+            setAdminUid(profile.uid);
+            setAdminLoggedIn(true);
+            setAdminProfile(profile);
+            setShowPasskeyManagement(true); // Open settings to register passkey immediately
+            setSuccessMsg('Email verified! Please register a passkey below to complete setup.');
+          } catch (err: any) {
+            console.error('Email link sign in failed:', err);
+            setError(err.message || 'Failed to complete registration.');
+          } finally {
+            setLoading(false);
+          }
+        }
+      }
+    };
+    checkEmailLink();
+  }, []);
+
+  // Listen to Auth State changes
+  React.useEffect(() => {
+    const unsubscribe = authAdapter.onAuthStateChanged((profile) => {
+      if (profile) {
+        setAdminLoggedIn(true);
+        setAdminUid(profile.uid);
+        setAdminProfile(profile);
+      } else {
+        setAdminLoggedIn(false);
+        setAdminUid(null);
+        setAdminProfile(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Handle Admin Auth
   const handleAdminAuth = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!adminEmail || !adminPassword) {
-      setError('Please enter email and password.');
+    if (!adminEmail) {
+      setError('Please enter your email.');
       return;
     }
 
     setLoading(true);
     setError(null);
+    setSuccessMsg(null);
 
     const cleanEmail = adminEmail.trim().toLowerCase();
 
     try {
-      let userCredential;
       if (isAdminRegister) {
         // Auto-seed braz@braz.me
         if (cleanEmail === 'braz@braz.me') {
@@ -165,16 +216,34 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
             return;
           }
         }
-        userCredential = await createUserWithEmailAndPassword(auth, adminEmail, adminPassword);
+        
+        await authAdapter.sendEmailSignInLink(cleanEmail);
+        setSuccessMsg(`A verification link has been sent to ${cleanEmail}. Please check your email to complete registration.`);
       } else {
-        userCredential = await signInWithEmailAndPassword(auth, adminEmail, adminPassword);
+        // Sign In logic
+        if (useRecoveryPassphrase) {
+          if (!recoveryPassphrase) {
+            setError('Please enter your recovery passphrase.');
+            setLoading(false);
+            return;
+          }
+          const profile = await authAdapter.signInWithBackupPassphrase(cleanEmail, recoveryPassphrase.trim());
+          setAdminUid(profile.uid);
+          setAdminLoggedIn(true);
+          setAdminProfile(profile);
+          setSuccessMsg('Logged in using recovery passphrase. Please register a new passkey immediately.');
+          setShowPasskeyManagement(true);
+        } else {
+          const profile = await authAdapter.signInWithPasskey(cleanEmail);
+          setAdminUid(profile.uid);
+          setAdminLoggedIn(true);
+          setAdminProfile(profile);
+          suggestRoomCode();
+        }
       }
-      setAdminUid(userCredential.user.uid);
-      setAdminLoggedIn(true);
-      suggestRoomCode(); // Suggest code immediately upon logging in
     } catch (err: any) {
       console.error(err);
-      setError(err.message || 'Authentication failed.');
+      setError(err.message || 'Authentication failed. Please verify your email or ensure passkeys are supported.');
     } finally {
       setLoading(false);
     }
@@ -592,8 +661,17 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                   {isAdminRegister ? 'Create Instructor Account' : 'Instructor Sign In'}
                 </h3>
                 <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '20px' }}>
-                  Authenticate to create and coordinate multiplayer classrooms.
+                  {isAdminRegister 
+                    ? 'Verify your email to enroll passwordless passkeys.' 
+                    : 'Authenticate to create and coordinate multiplayer classrooms.'}
                 </p>
+
+                {successMsg && (
+                  <div style={{ backgroundColor: 'rgba(34, 197, 94, 0.15)', border: '1px solid var(--accent-green)', borderRadius: 'var(--radius-sm)', padding: '10px', color: '#fff', fontSize: '0.85rem', marginBottom: '15px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <Check size={16} style={{ color: 'var(--accent-green)' }} />
+                    <span>{successMsg}</span>
+                  </div>
+                )}
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
                   <div>
@@ -618,44 +696,76 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                     />
                   </div>
 
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '5px', fontWeight: 600 }}>
-                      PASSWORD
-                    </label>
-                    <input 
-                      type="password"
-                      placeholder="••••••••"
-                      value={adminPassword}
-                      onChange={(e) => setAdminPassword(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px 12px',
-                        borderRadius: 'var(--radius-sm)',
-                        backgroundColor: 'rgba(0,0,0,0.3)',
-                        border: '1px solid var(--border-glass)',
-                        color: '#fff',
-                        fontSize: '0.9rem'
-                      }}
-                      required
-                    />
-                  </div>
+                  {!isAdminRegister && useRecoveryPassphrase && (
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '5px', fontWeight: 600 }}>
+                        RECOVERY PASSPHRASE
+                      </label>
+                      <input 
+                        type="text"
+                        placeholder="correct-horse-battery-staple"
+                        value={recoveryPassphrase}
+                        onChange={(e) => setRecoveryPassphrase(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          borderRadius: 'var(--radius-sm)',
+                          backgroundColor: 'rgba(0,0,0,0.3)',
+                          border: '1px solid var(--border-glass)',
+                          color: '#fff',
+                          fontSize: '0.9rem',
+                          fontFamily: 'monospace'
+                        }}
+                        required
+                      />
+                    </div>
+                  )}
 
                   <button
                     type="submit"
                     disabled={loading}
                     className="btn btn-primary"
-                    style={{ width: '100%', padding: '12px', marginTop: '10px' }}
+                    style={{ width: '100%', padding: '12px', marginTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
                   >
-                    {isAdminRegister ? <UserPlus size={16} /> : <LogIn size={16} />}
-                    {loading 
-                      ? 'Authenticating...' 
-                      : isAdminRegister ? 'Register Account' : 'Sign In'}
+                    {isAdminRegister ? (
+                      <>
+                        <RefreshCw size={16} className={loading ? 'spin' : ''} />
+                        {loading ? 'Sending Link...' : 'Send Verification Link'}
+                      </>
+                    ) : useRecoveryPassphrase ? (
+                      <>
+                        <Shield size={16} />
+                        {loading ? 'Verifying...' : 'Sign In with Passphrase'}
+                      </>
+                    ) : (
+                      <>
+                        <Key size={16} />
+                        {loading ? 'Waiting for Passkey...' : 'Sign In with Passkey'}
+                      </>
+                    )}
                   </button>
 
-                  <div style={{ textAlign: 'center', marginTop: '10px' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', alignItems: 'center', marginTop: '10px' }}>
+                    {!isAdminRegister && (
+                      <button
+                        type="button"
+                        onClick={() => { setUseRecoveryPassphrase(!useRecoveryPassphrase); setError(null); }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--text-secondary)',
+                          fontSize: '0.75rem',
+                          cursor: 'pointer',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        {useRecoveryPassphrase ? 'Use Standard Passkey Login' : 'Lost Passkey? Use Recovery Passphrase'}
+                      </button>
+                    )}
+
                     <button
                       type="button"
-                      onClick={() => { setIsAdminRegister(!isAdminRegister); setError(null); }}
+                      onClick={() => { setIsAdminRegister(!isAdminRegister); setError(null); setSuccessMsg(null); }}
                       style={{
                         background: 'none',
                         border: 'none',
@@ -673,12 +783,40 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
             ) : (
               /* B. ADMIN SESSION CREATOR / RESUMER */
               <div>
-                <h3 style={{ fontSize: '1.2rem', marginBottom: '8px', color: '#fff' }}>Configure Classroom Room</h3>
-                <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '20px' }}>
-                  Choose a custom code or check/create a room to manage.
-                </p>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '15px' }}>
+                  <h3 style={{ fontSize: '1.2rem', color: '#fff', margin: 0 }}>
+                    {showPasskeyManagement ? 'Manage Credentials' : 'Configure Classroom Room'}
+                  </h3>
+                  <button
+                    onClick={() => { setShowPasskeyManagement(!showPasskeyManagement); setError(null); setSuccessMsg(null); }}
+                    className="btn btn-secondary"
+                    style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px', height: 'fit-content', border: '1px solid var(--border-glass)', background: 'none' }}
+                  >
+                    <Settings size={14} />
+                    {showPasskeyManagement ? 'Configure Room' : 'Manage Passkeys'}
+                  </button>
+                </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {showPasskeyManagement ? (
+                  adminProfile && (
+                    <PasskeyManagement
+                      adminProfile={adminProfile}
+                      authAdapter={authAdapter}
+                      onProfileUpdate={async () => {
+                        const updatedProfile = await authAdapter.getCurrentUser();
+                        if (updatedProfile) {
+                          setAdminProfile(updatedProfile);
+                        }
+                      }}
+                    />
+                  )
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                    <div>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '10px' }}>
+                        Choose a custom code or check/create a room to manage.
+                      </p>
+                    </div>
                   
                   {/* Create New Room Section */}
                   <form onSubmit={handleCreateGame} style={{ borderBottom: '1px solid var(--border-glass)', paddingBottom: '20px' }}>
@@ -1147,24 +1285,26 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                       )}
                     </div>
                   </div>
-
-                  <button
-                    onClick={() => { setAdminLoggedIn(false); setAdminUid(null); }}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--text-muted)',
-                      fontSize: '0.7rem',
-                      cursor: 'pointer',
-                      textAlign: 'center',
-                      textDecoration: 'underline',
-                      marginTop: '10px'
-                    }}
-                  >
-                    Logout Instructor Account
-                  </button>
-
                 </div>
+              )}
+
+                <button
+                  onClick={async () => { await authAdapter.signOut(); }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    fontSize: '0.7rem',
+                    cursor: 'pointer',
+                    textAlign: 'center',
+                    textDecoration: 'underline',
+                    marginTop: '10px',
+                    width: '100%'
+                  }}
+                >
+                  Logout Instructor Account
+                </button>
+
               </div>
             )}
           </div>
