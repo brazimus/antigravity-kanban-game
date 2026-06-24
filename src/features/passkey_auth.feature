@@ -34,3 +34,16 @@ Feature: Passkey (WebAuthn) Authentication
     Then the login succeeds
     And the Admin is prompted to register a new passkey
 
+  Scenario: Toggle Passkey Management Screen via Header Button
+    Given an Admin is authenticated via email link
+    And the lobby is rendered in Instructor Mode
+    When the Admin clicks the "Manage Passkeys" button
+    Then the "Manage Credentials" screen is displayed
+    When the Admin clicks the "Configure Room" button
+    Then the "Configure Classroom Room" screen is displayed
+
+  Scenario: Switch to Passkey Management via Bottom Helper Link
+    Given an Admin is authenticated via email link
+    And the lobby is rendered in Instructor Mode
+    When the Admin clicks the "🔑 Manage, add, or revoke your Passkeys" link
+    Then the "Manage Credentials" screen is displayed

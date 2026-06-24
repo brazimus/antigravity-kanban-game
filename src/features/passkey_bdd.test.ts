@@ -1,7 +1,33 @@
 // @vitest-environment jsdom
+import React from 'react';
+import { render, screen, fireEvent, cleanup } from '@testing-library/react';
 import { BddRunner } from './bdd_runner';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import { AuthAdapterMock } from '../__mocks__/authAdapterMock';
+import { MultiplayerLobby } from '../components/MultiplayerLobby';
+
+let currentMockAuthAdapter: AuthAdapterMock;
+
+vi.mock('firebase/firestore', () => import('../__mocks__/firestore'));
+vi.mock('firebase/auth', () => {
+  return {
+    getAuth: () => ({ currentUser: { uid: 'admin-123', email: 'admin@example.com' } }),
+    signInAnonymously: async () => ({ user: { uid: 'anonymous-player' } }),
+    isSignInWithEmailLink: () => false
+  };
+});
+
+vi.mock('../firebase', () => {
+  return {
+    auth: { currentUser: { uid: 'admin-123', email: 'admin@example.com' } },
+    db: { type: 'database' },
+    authAdapter: new Proxy({}, {
+      get(_target, prop) {
+        return (currentMockAuthAdapter as any)[prop];
+      }
+    })
+  };
+});
 
 // Define a test context structure that holds our mock adapter
 interface TestContext {
@@ -158,6 +184,54 @@ runner.register(/^"([^"]+)" must authenticate via email link on next login$/, as
   await expect(auth.signInWithPasskey(email)).rejects.toThrow();
 });
 
+runner.register(/^the lobby is rendered in Instructor Mode$/, async (context: TestContext) => {
+  cleanup();
+  context.auth.seedUser({
+    uid: 'admin-123',
+    email: 'admin@example.com',
+    roles: { admin: true, superAdmin: false },
+    passkeys: [{ id: 'key-abc', label: 'My Laptop', createdAt: new Date().toISOString() }]
+  }, 'correct-horse-battery-staple');
+  // First make sure we are logged in as admin
+  await context.auth.signInWithEmailLink('admin@example.com', 'mock-link');
+
+  render(
+    React.createElement(MultiplayerLobby, {
+      onJoinAsPlayer: () => {},
+      onJoinAsAdmin: () => {}
+    })
+  );
+
+  // We need to switch to Instructor Mode tab!
+  const instructorTab = screen.getByRole('button', { name: /Class Instructor/i });
+  fireEvent.click(instructorTab);
+});
+
+runner.register(/^the Admin clicks the "Manage Passkeys" button$/, () => {
+  const btn = screen.getByRole('button', { name: /Manage Passkeys/i });
+  fireEvent.click(btn);
+});
+
+runner.register(/^the "Manage Credentials" screen is displayed$/, () => {
+  const heading = screen.getByRole('heading', { name: /Manage Credentials/i });
+  expect(heading).toBeDefined();
+});
+
+runner.register(/^the Admin clicks the "Configure Room" button$/, () => {
+  const btn = screen.getByRole('button', { name: /Configure Room/i });
+  fireEvent.click(btn);
+});
+
+runner.register(/^the "Configure Classroom Room" screen is displayed$/, () => {
+  const heading = screen.getByRole('heading', { name: /Configure Classroom Room/i });
+  expect(heading).toBeDefined();
+});
+
+runner.register(/^the Admin clicks the "🔑 Manage, add, or revoke your Passkeys" link$/, () => {
+  const btn = screen.getByRole('button', { name: /Manage, add, or revoke your Passkeys/i });
+  fireEvent.click(btn);
+});
+
 // Run scenarios
 const featureContent = `Feature: Passkey (WebAuthn) Authentication
   As a Classroom Admin
@@ -188,13 +262,31 @@ const featureContent = `Feature: Passkey (WebAuthn) Authentication
     When the Super-Admin revokes all passkeys for "assistant@example.com"
     Then the passkeys are removed from "assistant@example.com"'s profile
     And "assistant@example.com" must authenticate via email link on next login
+
+  Scenario: Toggle Passkey Management Screen via Header Button
+    Given an Admin is authenticated via email link
+    And the lobby is rendered in Instructor Mode
+    When the Admin clicks the "Manage Passkeys" button
+    Then the "Manage Credentials" screen is displayed
+    When the Admin clicks the "Configure Room" button
+    Then the "Configure Classroom Room" screen is displayed
+
+  Scenario: Switch to Passkey Management via Bottom Helper Link
+    Given an Admin is authenticated via email link
+    And the lobby is rendered in Instructor Mode
+    When the Admin clicks the "🔑 Manage, add, or revoke your Passkeys" link
+    Then the "Manage Credentials" screen is displayed
 `;
 
-runner.runFeature(featureContent, () => ({
-  auth: new AuthAdapterMock(),
-  actions: {
-    biometricPromptTriggered: false,
-    navigatedToLobby: false,
-    promptedToRegisterPasskey: false
-  }
-}));
+runner.runFeature(featureContent, () => {
+  const authInstance = new AuthAdapterMock();
+  currentMockAuthAdapter = authInstance;
+  return {
+    auth: authInstance,
+    actions: {
+      biometricPromptTriggered: false,
+      navigatedToLobby: false,
+      promptedToRegisterPasskey: false
+    }
+  };
+});

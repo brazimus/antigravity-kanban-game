@@ -472,8 +472,8 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
     <div style={{
       flex: 1,
       display: 'flex',
+      flexDirection: 'column',
       alignItems: 'center',
-      justifyContent: 'center',
       padding: '20px',
       height: '100%',
       overflowY: 'auto'
@@ -483,7 +483,8 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
         width: '100%',
         padding: '30px',
         borderRadius: 'var(--radius-lg)',
-        backgroundColor: 'var(--bg-glass-card)'
+        backgroundColor: 'var(--bg-glass-card)',
+        margin: 'auto 0'
       }}>
         {/* Toggle between Player and Admin tabs */}
         <div style={{
@@ -790,7 +791,7 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                   <button
                     onClick={() => { setShowPasskeyManagement(!showPasskeyManagement); setError(null); setSuccessMsg(null); }}
                     className="btn btn-secondary"
-                    style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px', height: 'fit-content', border: '1px solid var(--border-glass)', background: 'none' }}
+                    style={{ fontSize: '0.75rem', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '6px', height: 'fit-content', border: '1px solid var(--border-glass)' }}
                   >
                     <Settings size={14} />
                     {showPasskeyManagement ? 'Configure Room' : 'Manage Passkeys'}
@@ -1284,6 +1285,28 @@ export const MultiplayerLobby: React.FC<MultiplayerLobbyProps> = ({
                         ))
                       )}
                     </div>
+                  </div>
+
+                  {/* Helper Navigation Link for Passkey Management */}
+                  <div style={{ display: 'flex', justifyContent: 'center', marginTop: '10px' }}>
+                    <button
+                      type="button"
+                      onClick={() => { setShowPasskeyManagement(true); setError(null); setSuccessMsg(null); }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--secondary)',
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        textDecoration: 'underline',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                        fontWeight: 600
+                      }}
+                    >
+                      🔑 Manage, add, or revoke your Passkeys
+                    </button>
                   </div>
                 </div>
               )}
