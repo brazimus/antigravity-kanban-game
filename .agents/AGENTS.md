@@ -33,3 +33,9 @@
 *   **Clear Analogies**: Document complex TypeScript or React reactive patterns by drawing clear analogies to Perl patterns (e.g. associative hashes, array mapping, regexes) and SQL/relational concepts (e.g. ACID transactions, continuous cursors, tables, indexing).
 *   **Agent-Independent Walkthroughs**: Coding agents must persist clear markdown documentation of all changes (including test walkthroughs) so that the user and other coding agents can understand the architecture changes independently of the tool used.
 *   **No Code Placeholders**: Never use temporary stubs or incomplete placeholders in code changes.
+
+## Distributed Team Coordination & Issue-First Workflow Policy
+*   **Issue-First Implementation**: No coding implementation work can begin before establishing clear Features and User Stories. Each User Story must be registered, approved, and contain explicit Acceptance Criteria (AC) and Given-When-Then BDD scenarios.
+*   **Branch-to-Issue Traceability**: All feature branch names must follow the convention `issue-<ID>-<short-description>`.
+*   **PR reviews and templates**: Pull Requests must include a standard description template outlining the linked issues, architectural/design changes, and verification summaries.
+
