@@ -6,6 +6,8 @@
     2.  Query the GitHub Actions workflow runs (using `gh run list` and `gh run view`) to confirm that the build and deployment pipeline finishes with a status of `success`.
     3.  Confirm that the deployed application is returning the expected output (e.g. check compilation/access) before handoff.
     4.  Only notify the Product Owner for review after the live build is verified green.
+*   **Firebase Changes & Infrastructure as Code**: All changes to Firebase settings, Firestore security rules, indexes, and Cloud Functions must be fully tracked in source control (e.g., in `firestore.rules`, `firebase.json`, or the `functions/` directory) and deployed automatically through the GitHub Actions CI/CD workflow as part of the normal deployment process. If automated CI/CD deployment is not supported for a specific resource, the deploy procedure must be run using the Firebase CLI and verified before handover.
+
 
 ## Agentic Test-Driven Development (TDD) Policy
 *   **BDD-First & Test-First Implementation**: All development work must start with defining Gherkin scenarios in a `.feature` file and implementing step definition tests first before writing features or modifying core components.
