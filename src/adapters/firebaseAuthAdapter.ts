@@ -5,16 +5,17 @@ import {
   sendSignInLinkToEmail, 
   signInWithEmailLink as fbSignInWithEmailLink,
   onAuthStateChanged as fbOnAuthStateChanged,
-  signInWithEmailAndPassword
+  signInWithEmailAndPassword,
+  getAuth
 } from 'firebase/auth';
-import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, getFirestore } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { auth, db } from '../firebase';
 
 // Note: We initialize Firebase Cloud Functions lazily within class methods to avoid
 // circular dependency issues on module load.
 
-// Base64URL helper utilities for browser-to-backend WebAuthn serialization
+
+// Helper base64url converters for browser-to-backend WebAuthn serialization
 function bufferToBase64Url(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer);
   let binary = '';
@@ -42,15 +43,58 @@ function base64UrlToBuffer(base64url: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+/**
+ * Extracts details from a Firebase Functions HttpsError and formats them into a descriptive standard Error.
+ */
+export function handleCallableError(err: any, actionName: string): Error {
+  console.error(`Firebase function during "${actionName}" failed:`, err);
+  if (err && typeof err === 'object') {
+    const code = err.code || 'unknown';
+    const message = err.message || 'No error message provided';
+    
+    // Check if the server passed a structured details object
+    let detailsStr = '';
+    if (err.details) {
+      if (typeof err.details === 'string') {
+        detailsStr = ` (Details: ${err.details})`;
+      } else {
+        try {
+          detailsStr = ` (Details: ${JSON.stringify(err.details)})`;
+        } catch {
+          // ignore serialization errors
+        }
+      }
+    }
+    
+    const displayMsg = `[${code}] Failed during ${actionName}: ${message}${detailsStr}`;
+    const formattedError = new Error(displayMsg);
+    // Attach details for programmatic inspectability
+    (formattedError as any).code = code;
+    (formattedError as any).details = err.details;
+    (formattedError as any).originalError = err;
+    return formattedError;
+  }
+  
+  return new Error(`Failed during ${actionName}: ${String(err)}`);
+}
+
 export class FirebaseAuthAdapter implements AuthAdapter {
+  private get auth() {
+    return getAuth();
+  }
+
+  private get db() {
+    return getFirestore();
+  }
+
   public async getCurrentUser(): Promise<AdminProfile | null> {
-    const user = auth.currentUser;
+    const user = this.auth.currentUser;
     if (!user) return null;
     return this.fetchAdminProfile(user.uid, user.email || '');
   }
 
   public onAuthStateChanged(callback: (user: AdminProfile | null) => void): () => void {
-    return fbOnAuthStateChanged(auth, async (fbUser) => {
+    return fbOnAuthStateChanged(this.auth, async (fbUser) => {
       if (!fbUser) {
         callback(null);
         return;
@@ -67,7 +111,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
 
   private async fetchAdminProfile(uid: string, email: string): Promise<AdminProfile> {
     try {
-      const userDocRef = doc(db, 'users', uid);
+      const userDocRef = doc(this.db, 'users', uid);
       const userSnapshot = await getDoc(userDocRef);
       
       if (!userSnapshot.exists()) {
@@ -84,7 +128,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
       const roles = data.roles || { admin: true, superAdmin: false };
 
       // Fetch credentials list
-      const credentialsRef = collection(db, 'users', uid, 'credentials');
+      const credentialsRef = collection(this.db, 'users', uid, 'credentials');
       const credentialsSnapshot = await getDocs(credentialsRef);
       const passkeys: PasskeyInfo[] = credentialsSnapshot.docs.map(d => {
         const c = d.data();
@@ -117,113 +161,179 @@ export class FirebaseAuthAdapter implements AuthAdapter {
       url: window.location.href,
       handleCodeInApp: true
     };
-    await sendSignInLinkToEmail(auth, email, actionCodeSettings);
+    await sendSignInLinkToEmail(this.auth, email, actionCodeSettings);
     // Store email locally for sign-in completion
     window.localStorage.setItem('emailForSignIn', email);
   }
 
   public async signInWithEmailLink(email: string, link: string): Promise<AdminProfile> {
-    const credential = await fbSignInWithEmailLink(auth, email, link);
+    const credential = await fbSignInWithEmailLink(this.auth, email, link);
     window.localStorage.removeItem('emailForSignIn');
     return this.fetchAdminProfile(credential.user.uid, email);
   }
 
   public async signInWithPasskey(email: string): Promise<AdminProfile> {
-    // 1. Get Authentication Options from backend
-    const getOptionsFn = httpsCallable<{ email: string }, { options: any }>(getFunctions(), 'generateAuthenticationOptions');
-    const { data: { options } } = await getOptionsFn({ email });
-
-    // 2. Decode challenge and allowCredentials ids to ArrayBuffers
-    options.challenge = base64UrlToBuffer(options.challenge);
-    if (options.allowCredentials) {
-      options.allowCredentials = options.allowCredentials.map((cred: any) => ({
-        ...cred,
-        id: base64UrlToBuffer(cred.id)
-      }));
-    }
-
-    // 3. Trigger Browser WebAuthn API
-    const assertion = await navigator.credentials.get({ publicKey: options }) as PublicKeyCredential;
-    if (!assertion) {
-      throw new Error('Authentication cancelled or failed.');
-    }
-
-    // 4. Encode assertion buffers back to Base64URL
-    const assertionResponse = assertion.response as AuthenticatorAssertionResponse;
-    const serializedAssertion = {
-      id: assertion.id,
-      rawId: bufferToBase64Url(assertion.rawId),
-      type: assertion.type,
-      response: {
-        authenticatorData: bufferToBase64Url(assertionResponse.authenticatorData),
-        clientDataJSON: bufferToBase64Url(assertionResponse.clientDataJSON),
-        signature: bufferToBase64Url(assertionResponse.signature),
-        userHandle: assertionResponse.userHandle ? bufferToBase64Url(assertionResponse.userHandle) : null
+    try {
+      // 1. Get Authentication Options from backend
+      const getOptionsFn = httpsCallable<{ email: string }, { options: any }>(getFunctions(), 'generateAuthenticationOptions');
+      let options;
+      try {
+        const res = await getOptionsFn({ email });
+        options = res.data.options;
+      } catch (err) {
+        throw handleCallableError(err, 'getting passkey authentication options');
       }
-    };
 
-    // 5. Verify Authentication Response in Backend
-    const verifyAuthFn = httpsCallable<
-      { email: string; assertion: any }, 
-      { customToken: string }
-    >(getFunctions(), 'verifyAuthentication');
-    const { data: { customToken } } = await verifyAuthFn({ email, assertion: serializedAssertion });
+      // 2. Decode challenge and allowCredentials ids to ArrayBuffers
+      try {
+        options.challenge = base64UrlToBuffer(options.challenge);
+        if (options.allowCredentials) {
+          options.allowCredentials = options.allowCredentials.map((cred: any) => ({
+            ...cred,
+            id: base64UrlToBuffer(cred.id)
+          }));
+        }
+      } catch (err) {
+        throw new Error(`Failed to process passkey authentication options: ${err instanceof Error ? err.message : err}`);
+      }
 
-    // 6. Sign in to Firebase Auth using the returned token
-    const credential = await signInWithCustomToken(auth, customToken);
-    return this.fetchAdminProfile(credential.user.uid, email);
+      // 3. Trigger Browser WebAuthn API
+      let assertion;
+      try {
+        assertion = await navigator.credentials.get({ publicKey: options }) as PublicKeyCredential;
+        if (!assertion) {
+          throw new Error('Authentication cancelled or failed.');
+        }
+      } catch (err) {
+        throw new Error(`Device passkey authentication failed: ${err instanceof Error ? err.message : err}`);
+      }
+
+      // 4. Encode assertion buffers back to Base64URL
+      let serializedAssertion;
+      try {
+        const assertionResponse = assertion.response as AuthenticatorAssertionResponse;
+        serializedAssertion = {
+          id: assertion.id,
+          rawId: bufferToBase64Url(assertion.rawId),
+          type: assertion.type,
+          response: {
+            authenticatorData: bufferToBase64Url(assertionResponse.authenticatorData),
+            clientDataJSON: bufferToBase64Url(assertionResponse.clientDataJSON),
+            signature: bufferToBase64Url(assertionResponse.signature),
+            userHandle: assertionResponse.userHandle ? bufferToBase64Url(assertionResponse.userHandle) : null
+          }
+        };
+      } catch (err) {
+        throw new Error(`Failed to serialize passkey credentials: ${err instanceof Error ? err.message : err}`);
+      }
+
+      // 5. Verify Authentication Response in Backend
+      const verifyAuthFn = httpsCallable<
+        { email: string; assertion: any }, 
+        { customToken: string }
+      >(getFunctions(), 'verifyAuthentication');
+      let customToken;
+      try {
+        const res = await verifyAuthFn({ email, assertion: serializedAssertion });
+        customToken = res.data.customToken;
+      } catch (err) {
+        throw handleCallableError(err, 'verifying passkey authentication');
+      }
+
+      // 6. Sign in to Firebase Auth using the returned token
+      try {
+        const credential = await signInWithCustomToken(this.auth, customToken);
+        return this.fetchAdminProfile(credential.user.uid, email);
+      } catch (err) {
+        throw new Error(`Firebase sign-in failed: ${err instanceof Error ? err.message : err}`);
+      }
+    } catch (err: any) {
+      if (err instanceof Error) throw err;
+      throw new Error(`signInWithPasskey failed: ${String(err)}`);
+    }
   }
 
   public async registerPasskey(label: string): Promise<{ backupPassphrase: string }> {
-    const user = auth.currentUser;
+    const user = this.auth.currentUser;
     if (!user) throw new Error('Must be authenticated to register a passkey.');
 
-    // 1. Request registration options from backend
-    const getOptionsFn = httpsCallable<{ userId: string; email: string }, { options: any }>(getFunctions(), 'generateRegistrationOptions');
-    const { data: { options } } = await getOptionsFn({ userId: user.uid, email: user.email || '' });
-
-    // 2. Decode challenge and user.id to ArrayBuffers
-    options.challenge = base64UrlToBuffer(options.challenge);
-    options.user.id = base64UrlToBuffer(options.user.id);
-    if (options.excludeCredentials) {
-      options.excludeCredentials = options.excludeCredentials.map((cred: any) => ({
-        ...cred,
-        id: base64UrlToBuffer(cred.id)
-      }));
-    }
-
-    // 3. Trigger browser WebAuthn registration prompt
-    const credential = await navigator.credentials.create({ publicKey: options }) as PublicKeyCredential;
-    if (!credential) {
-      throw new Error('Registration cancelled or failed.');
-    }
-
-    // 4. Encode credential buffers back to Base64URL
-    const attestationResponse = credential.response as AuthenticatorAttestationResponse;
-    const serializedCredential = {
-      id: credential.id,
-      rawId: bufferToBase64Url(credential.rawId),
-      type: credential.type,
-      response: {
-        attestationObject: bufferToBase64Url(attestationResponse.attestationObject),
-        clientDataJSON: bufferToBase64Url(attestationResponse.clientDataJSON),
-        transports: attestationResponse.getTransports ? attestationResponse.getTransports() : []
+    try {
+      // 1. Request registration options from backend
+      const getOptionsFn = httpsCallable<{ userId: string; email: string }, { options: any }>(getFunctions(), 'generateRegistrationOptions');
+      let options;
+      try {
+        const res = await getOptionsFn({ userId: user.uid, email: user.email || '' });
+        options = res.data.options;
+      } catch (err) {
+        throw handleCallableError(err, 'getting passkey registration options');
       }
-    };
 
-    // 5. Verify registration in backend
-    const verifyRegistrationFn = httpsCallable<
-      { userId: string; email: string; label: string; credential: any }, 
-      { backupPassphrase: string }
-    >(getFunctions(), 'verifyRegistration');
-    const { data: { backupPassphrase } } = await verifyRegistrationFn({ 
-      userId: user.uid, 
-      email: user.email || '', 
-      label, 
-      credential: serializedCredential 
-    });
+      // 2. Decode challenge and user.id to ArrayBuffers
+      try {
+        options.challenge = base64UrlToBuffer(options.challenge);
+        options.user.id = base64UrlToBuffer(options.user.id);
+        if (options.excludeCredentials) {
+          options.excludeCredentials = options.excludeCredentials.map((cred: any) => ({
+            ...cred,
+            id: base64UrlToBuffer(cred.id)
+          }));
+        }
+      } catch (err) {
+        throw new Error(`Failed to process passkey registration options: ${err instanceof Error ? err.message : err}`);
+      }
 
-    return { backupPassphrase };
+      // 3. Trigger browser WebAuthn registration prompt
+      let credential;
+      try {
+        credential = await navigator.credentials.create({ publicKey: options }) as PublicKeyCredential;
+        if (!credential) {
+          throw new Error('Registration cancelled or failed.');
+        }
+      } catch (err) {
+        throw new Error(`Device passkey registration failed: ${err instanceof Error ? err.message : err}`);
+      }
+
+      // 4. Encode credential buffers back to Base64URL
+      let serializedCredential;
+      try {
+        const attestationResponse = credential.response as AuthenticatorAttestationResponse;
+        serializedCredential = {
+          id: credential.id,
+          rawId: bufferToBase64Url(credential.rawId),
+          type: credential.type,
+          response: {
+            attestationObject: bufferToBase64Url(attestationResponse.attestationObject),
+            clientDataJSON: bufferToBase64Url(attestationResponse.clientDataJSON),
+            transports: attestationResponse.getTransports ? attestationResponse.getTransports() : []
+          }
+        };
+      } catch (err) {
+        throw new Error(`Failed to serialize passkey credentials: ${err instanceof Error ? err.message : err}`);
+      }
+
+      // 5. Verify registration in backend
+      const verifyRegistrationFn = httpsCallable<
+        { userId: string; email: string; label: string; credential: any }, 
+        { backupPassphrase: string }
+      >(getFunctions(), 'verifyRegistration');
+      let backupPassphrase;
+      try {
+        const res = await verifyRegistrationFn({ 
+          userId: user.uid, 
+          email: user.email || '', 
+          label, 
+          credential: serializedCredential 
+        });
+        backupPassphrase = res.data.backupPassphrase;
+      } catch (err) {
+        throw handleCallableError(err, 'verifying passkey registration');
+      }
+
+      return { backupPassphrase };
+    } catch (err: any) {
+      if (err instanceof Error) throw err;
+      throw new Error(`registerPasskey failed: ${String(err)}`);
+    }
   }
 
   public async signInWithBackupPassphrase(email: string, passphrase: string): Promise<AdminProfile> {
@@ -232,49 +342,68 @@ export class FirebaseAuthAdapter implements AuthAdapter {
         { email: string; passphrase: string }, 
         { customToken: string }
       >(getFunctions(), 'verifyBackupPassphrase');
-      const { data: { customToken } } = await verifyBackupFn({ email, passphrase });
+      let customToken;
+      try {
+        const res = await verifyBackupFn({ email, passphrase });
+        customToken = res.data.customToken;
+      } catch (err) {
+        throw handleCallableError(err, 'verifying backup recovery passphrase');
+      }
 
-      const credential = await signInWithCustomToken(auth, customToken);
+      const credential = await signInWithCustomToken(this.auth, customToken);
       return this.fetchAdminProfile(credential.user.uid, email);
     } catch (err: unknown) {
       console.warn('Backup passphrase verification failed, attempting standard email/password login as fallback:', err);
       try {
         // Fallback to standard email/password authentication (useful for pre-passkey legacy accounts)
-        const credential = await signInWithEmailAndPassword(auth, email, passphrase);
+        const credential = await signInWithEmailAndPassword(this.auth, email, passphrase);
         return this.fetchAdminProfile(credential.user.uid, email);
       } catch (fallbackErr: unknown) {
         console.error('Email/password fallback also failed:', fallbackErr);
         // Throw a user-friendly error
-        const errorMessage = fallbackErr instanceof Error ? fallbackErr.message : 'Authentication failed. Invalid passkey recovery code or password.';
-        throw new Error(errorMessage, { cause: fallbackErr });
+        const originalMsg = fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        const mainMsg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Authentication failed. Recovery failed: ${mainMsg}. Password login fallback failed: ${originalMsg}`);
       }
     }
   }
 
   public async deletePasskey(credentialId: string): Promise<void> {
-    const deleteCredentialFn = httpsCallable<{ credentialId: string }, void>(getFunctions(), 'deleteCredential');
-    await deleteCredentialFn({ credentialId });
+    try {
+      const deleteCredentialFn = httpsCallable<{ credentialId: string }, void>(getFunctions(), 'deleteCredential');
+      await deleteCredentialFn({ credentialId });
+    } catch (err) {
+      throw handleCallableError(err, 'deleting passkey');
+    }
   }
 
   public async getPasskeys(): Promise<PasskeyInfo[]> {
-    const user = auth.currentUser;
+    const user = this.auth.currentUser;
     if (!user) return [];
     const profile = await this.fetchAdminProfile(user.uid, user.email || '');
     return profile.passkeys;
   }
 
   public async signOut(): Promise<void> {
-    await fbSignOut(auth);
+    await fbSignOut(this.auth);
   }
 
   public async listAllAdmins(): Promise<AdminProfile[]> {
-    const listAdminsFn = httpsCallable<void, { admins: AdminProfile[] }>(getFunctions(), 'listAllAdmins');
-    const { data: { admins } } = await listAdminsFn();
-    return admins;
+    try {
+      const listAdminsFn = httpsCallable<void, { admins: AdminProfile[] }>(getFunctions(), 'listAllAdmins');
+      const { data: { admins } } = await listAdminsFn();
+      return admins;
+    } catch (err) {
+      throw handleCallableError(err, 'listing administrators');
+    }
   }
 
   public async revokeAdminPasskeys(uid: string): Promise<void> {
-    const revokeFn = httpsCallable<{ uid: string }, void>(getFunctions(), 'revokeUserCredentials');
-    await revokeFn({ uid });
+    try {
+      const revokeFn = httpsCallable<{ uid: string }, void>(getFunctions(), 'revokeUserCredentials');
+      await revokeFn({ uid });
+    } catch (err) {
+      throw handleCallableError(err, 'revoking user credentials');
+    }
   }
 }
