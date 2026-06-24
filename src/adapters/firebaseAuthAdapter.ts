@@ -8,10 +8,10 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import app, { auth, db } from '../firebase';
+import { auth, db } from '../firebase';
 
-// Initialize Firebase Cloud Functions
-const functions = getFunctions(app);
+// Note: We initialize Firebase Cloud Functions lazily within class methods to avoid
+// circular dependency issues on module load.
 
 // Base64URL helper utilities for browser-to-backend WebAuthn serialization
 function bufferToBase64Url(buffer: ArrayBuffer): string {
@@ -114,7 +114,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
 
   public async signInWithPasskey(email: string): Promise<AdminProfile> {
     // 1. Get Authentication Options from backend
-    const getOptionsFn = httpsCallable<{ email: string }, { options: any }>(functions, 'generateAuthenticationOptions');
+    const getOptionsFn = httpsCallable<{ email: string }, { options: any }>(getFunctions(), 'generateAuthenticationOptions');
     const { data: { options } } = await getOptionsFn({ email });
 
     // 2. Decode challenge and allowCredentials ids to ArrayBuffers
@@ -150,7 +150,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
     const verifyAuthFn = httpsCallable<
       { email: string; assertion: any }, 
       { customToken: string }
-    >(functions, 'verifyAuthentication');
+    >(getFunctions(), 'verifyAuthentication');
     const { data: { customToken } } = await verifyAuthFn({ email, assertion: serializedAssertion });
 
     // 6. Sign in to Firebase Auth using the returned token
@@ -163,7 +163,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
     if (!user) throw new Error('Must be authenticated to register a passkey.');
 
     // 1. Request registration options from backend
-    const getOptionsFn = httpsCallable<{ userId: string; email: string }, { options: any }>(functions, 'generateRegistrationOptions');
+    const getOptionsFn = httpsCallable<{ userId: string; email: string }, { options: any }>(getFunctions(), 'generateRegistrationOptions');
     const { data: { options } } = await getOptionsFn({ userId: user.uid, email: user.email || '' });
 
     // 2. Decode challenge and user.id to ArrayBuffers
@@ -199,7 +199,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
     const verifyRegistrationFn = httpsCallable<
       { userId: string; email: string; label: string; credential: any }, 
       { backupPassphrase: string }
-    >(functions, 'verifyRegistration');
+    >(getFunctions(), 'verifyRegistration');
     const { data: { backupPassphrase } } = await verifyRegistrationFn({ 
       userId: user.uid, 
       email: user.email || '', 
@@ -214,7 +214,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
     const verifyBackupFn = httpsCallable<
       { email: string; passphrase: string }, 
       { customToken: string }
-    >(functions, 'verifyBackupPassphrase');
+    >(getFunctions(), 'verifyBackupPassphrase');
     const { data: { customToken } } = await verifyBackupFn({ email, passphrase });
 
     const credential = await signInWithCustomToken(auth, customToken);
@@ -222,7 +222,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
   }
 
   public async deletePasskey(credentialId: string): Promise<void> {
-    const deleteCredentialFn = httpsCallable<{ credentialId: string }, void>(functions, 'deleteCredential');
+    const deleteCredentialFn = httpsCallable<{ credentialId: string }, void>(getFunctions(), 'deleteCredential');
     await deleteCredentialFn({ credentialId });
   }
 
@@ -238,13 +238,13 @@ export class FirebaseAuthAdapter implements AuthAdapter {
   }
 
   public async listAllAdmins(): Promise<AdminProfile[]> {
-    const listAdminsFn = httpsCallable<void, { admins: AdminProfile[] }>(functions, 'listAllAdmins');
+    const listAdminsFn = httpsCallable<void, { admins: AdminProfile[] }>(getFunctions(), 'listAllAdmins');
     const { data: { admins } } = await listAdminsFn();
     return admins;
   }
 
   public async revokeAdminPasskeys(uid: string): Promise<void> {
-    const revokeFn = httpsCallable<{ uid: string }, void>(functions, 'revokeUserCredentials');
+    const revokeFn = httpsCallable<{ uid: string }, void>(getFunctions(), 'revokeUserCredentials');
     await revokeFn({ uid });
   }
 }
