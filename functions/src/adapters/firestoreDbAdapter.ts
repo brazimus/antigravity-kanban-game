@@ -1,5 +1,5 @@
 import { DbAdapter, SavedCredential, UserProfile } from './dbAdapter.js';
-import * as admin from 'firebase-admin';
+import admin from 'firebase-admin';
 
 export class FirestoreDbAdapter implements DbAdapter {
   private get db() {
