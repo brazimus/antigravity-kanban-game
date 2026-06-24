@@ -43,14 +43,14 @@
 *   **Story Sizing Mandatory**: Every User Story must be estimated using one of the six T-Shirt sizes (XS, S, M, L, XL, XXL) before work begins. Features must not have an estimate directly, as their size is the sum of their child stories.
 *   **GitHub Projects Visibility**: Sizing must be selected in the "Size" custom field in the GitHub Project and as a label on the GitHub issue (e.g., `size:M`).
 *   **Size to Quota Mapping Table**:
-    | Size | Turn Budget | Est. 4-Hour Quota | Est. Daily Quota | Action / Mitigation Policy |
-    |---|---|---|---|---|
-    | **XS** | 1-2 | 2% - 5% | 1% - 2% | Fit in 1-2 turns. Normal execution. |
-    | **S** | 2-3 | 5% - 10% | 2% - 5% | Minor refactoring/components. 1-2 commits. |
-    | **M** | 4-5 | 15% - 25% | 5% - 10% | Average story size. Update `task.md` and commit when green. |
-    | **L** | 6-8 | 30% - 50% | 15% - 25% | Large story. Frequent checkpoint commits. Red/Green phase separation. |
-    | **XL** | 8-12 | 60% - 100% | 30% - 50% | High limit risk. Consider splitting. Commit every green turn, push branch. |
-    | **XXL** | 12+ | >100% (Blocker) | 60% - 100% | **Refactoring/Decomposition required**. Must be split into smaller stories before starting. |
+    | Size | Color (HEX) | Turn Budget | Est. 4-Hour Quota | Est. Daily Quota | Action / Mitigation Policy |
+    |---|---|---|---|---|---|
+    | **XS** | Soft Sage (`bfebd4`) | 1-2 | 2% - 5% | 1% - 2% | Fit in 1-2 turns. Normal execution. |
+    | **S** | Soft Green (`93f0b8`) | 2-3 | 5% - 10% | 2% - 5% | Minor refactoring/components. 1-2 commits. |
+    | **M** | Warm Yellow (`ebd44f`) | 4-5 | 15% - 25% | 5% - 10% | Average story size. Update `task.md` and commit when green. |
+    | **L** | Soft Orange (`ffae42`) | 6-8 | 30% - 50% | 15% - 25% | Large story. Frequent checkpoint commits. Red/Green phase separation. |
+    | **XL** | Coral Orange (`ff8b70`) | 8-12 | 60% - 100% | 30% - 50% | High limit risk. Consider splitting. Commit every green turn, push branch. |
+    | **XXL** | Blocker Red (`e03e3e`) | 12+ | >100% (Blocker) | 60% - 100% | **Refactoring/Decomposition required**. Must be split into smaller stories before starting. |
 *   **Token Expiration Resiliency Rules**:
     1.  **Task checklist**: Keep `task.md` in the artifacts directory up to date at all times. Mark each sub-task as `[/]` (in progress) or `[x]` (completed) dynamically.
     2.  **Handoff summaries**: If quota usage is high or rate limits are approaching, the agent must write a handoff summary at the end of the turn, highlighting the exact current state, next file to edit, and target tests.
