@@ -69,12 +69,18 @@ export class FirebaseAuthAdapter implements AuthAdapter {
     const userDocRef = doc(db, 'users', uid);
     const userSnapshot = await getDoc(userDocRef);
     
-    let roles = { admin: true, superAdmin: false };
-
-    if (userSnapshot.exists()) {
-      const data = userSnapshot.data();
-      roles = data.roles || roles;
+    if (!userSnapshot.exists()) {
+      // Legacy user has no profile document and no passkeys registered yet
+      return {
+        uid,
+        email,
+        roles: { admin: true, superAdmin: false },
+        passkeys: []
+      };
     }
+
+    const data = userSnapshot.data();
+    const roles = data.roles || { admin: true, superAdmin: false };
 
     // Fetch credentials list
     const credentialsRef = collection(db, 'users', uid, 'credentials');
