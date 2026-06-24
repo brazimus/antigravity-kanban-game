@@ -109,7 +109,7 @@ export const generateRegistrationOptions = onCall(async (request) => {
   const options = await genRegOptions({
     rpName,
     rpID: getRpId(request),
-    userID: Buffer.from(userId) as any,
+    userID: bufferToBase64Url(Buffer.from(userId)) as any,
     userName: email,
     userDisplayName: email,
     attestationType: 'none',
