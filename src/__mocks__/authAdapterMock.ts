@@ -3,6 +3,7 @@ import type { AuthAdapter, AdminProfile, PasskeyInfo } from '../adapters/authAda
 export class AuthAdapterMock implements AuthAdapter {
   private users: Record<string, AdminProfile> = {};
   private backupHashes: Record<string, string> = {}; // uid -> hash
+  private legacyPasswords: Record<string, string> = {}; // uid -> password
   private currentUser: AdminProfile | null = null;
   private listeners: ((user: AdminProfile | null) => void)[] = [];
 
@@ -13,15 +14,19 @@ export class AuthAdapterMock implements AuthAdapter {
   public reset() {
     this.users = {};
     this.backupHashes = {};
+    this.legacyPasswords = {};
     this.currentUser = null;
     this.listeners = [];
   }
 
   // Helper for tests to seed users
-  public seedUser(user: AdminProfile, backupPassphrase?: string) {
+  public seedUser(user: AdminProfile, backupPassphrase?: string, password?: string) {
     this.users[user.uid] = { ...user };
     if (backupPassphrase) {
       this.backupHashes[user.uid] = `hash-${backupPassphrase}`;
+    }
+    if (password) {
+      this.legacyPasswords[user.uid] = password;
     }
   }
 
@@ -46,11 +51,13 @@ export class AuthAdapterMock implements AuthAdapter {
     };
   }
 
-  public async sendEmailSignInLink(_email: string): Promise<void> {
+  public async sendEmailSignInLink(email: string): Promise<void> {
     // Mock sending email link
+    void email;
   }
 
-  public async signInWithEmailLink(email: string, _link: string): Promise<AdminProfile> {
+  public async signInWithEmailLink(email: string, link: string): Promise<AdminProfile> {
+    void link;
     let user = Object.values(this.users).find(u => u.email === email);
     if (!user) {
       user = {
@@ -101,12 +108,18 @@ export class AuthAdapterMock implements AuthAdapter {
       throw new Error('User not found.');
     }
     const expectedHash = this.backupHashes[user.uid];
-    if (!expectedHash || expectedHash !== `hash-${passphrase}`) {
-      throw new Error('Invalid recovery passphrase.');
+    if (expectedHash && expectedHash === `hash-${passphrase}`) {
+      this.currentUser = user;
+      this.notify();
+      return user;
     }
-    this.currentUser = user;
-    this.notify();
-    return user;
+    const expectedPassword = this.legacyPasswords[user.uid];
+    if (expectedPassword && expectedPassword === passphrase) {
+      this.currentUser = user;
+      this.notify();
+      return user;
+    }
+    throw new Error('Invalid recovery passphrase or password.');
   }
 
   public async deletePasskey(credentialId: string): Promise<void> {

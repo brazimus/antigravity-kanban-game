@@ -27,3 +27,10 @@ Feature: Passkey (WebAuthn) Authentication
     When the Super-Admin revokes all passkeys for "assistant@example.com"
     Then the passkeys are removed from "assistant@example.com"'s profile
     And "assistant@example.com" must authenticate via email link on next login
+
+  Scenario: Recovery Login using Legacy Password Fallback
+    Given a legacy Admin "braz@braz.me" with password "mySecretPassword" who has no passkey or backup passphrase hash
+    When the Admin logs in with backup passphrase "mySecretPassword" for "braz@braz.me"
+    Then the login succeeds
+    And the Admin is prompted to register a new passkey
+
