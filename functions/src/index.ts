@@ -130,7 +130,9 @@ export const generateRegistrationOptions = onCall(async (request) => {
   } catch (err: any) {
     console.error('Error in generateRegistrationOptions:', err);
     if (err instanceof HttpsError) throw err;
-    throw new HttpsError('internal', `generateRegistrationOptions failed: ${err.message || err}`);
+    throw new HttpsError('internal', `generateRegistrationOptions failed: ${err.message || err}`, {
+      originalError: err.message || String(err)
+    });
   }
 });
 
@@ -201,7 +203,9 @@ export const verifyRegistration = onCall(async (request) => {
   } catch (err: any) {
     console.error('Error in verifyRegistration:', err);
     if (err instanceof HttpsError) throw err;
-    throw new HttpsError('internal', `verifyRegistration failed: ${err.message || err}`);
+    throw new HttpsError('internal', `verifyRegistration failed: ${err.message || err}`, {
+      originalError: err.message || String(err)
+    });
   }
 });
 
@@ -239,7 +243,9 @@ export const generateAuthenticationOptions = onCall(async (request) => {
   } catch (err: any) {
     console.error('Error in generateAuthenticationOptions:', err);
     if (err instanceof HttpsError) throw err;
-    throw new HttpsError('internal', `generateAuthenticationOptions failed: ${err.message || err}`);
+    throw new HttpsError('internal', `generateAuthenticationOptions failed: ${err.message || err}`, {
+      originalError: err.message || String(err)
+    });
   }
 });
 
@@ -302,7 +308,9 @@ export const verifyAuthentication = onCall(async (request) => {
   } catch (err: any) {
     console.error('Error in verifyAuthentication:', err);
     if (err instanceof HttpsError) throw err;
-    throw new HttpsError('internal', `verifyAuthentication failed: ${err.message || err}`);
+    throw new HttpsError('internal', `verifyAuthentication failed: ${err.message || err}`, {
+      originalError: err.message || String(err)
+    });
   }
 });
 
@@ -334,7 +342,9 @@ export const verifyBackupPassphrase = onCall(async (request) => {
   } catch (err: any) {
     console.error('Error in verifyBackupPassphrase:', err);
     if (err instanceof HttpsError) throw err;
-    throw new HttpsError('internal', `verifyBackupPassphrase failed: ${err.message || err}`);
+    throw new HttpsError('internal', `verifyBackupPassphrase failed: ${err.message || err}`, {
+      originalError: err.message || String(err)
+    });
   }
 });
 
