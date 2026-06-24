@@ -15,7 +15,11 @@ admin.initializeApp();
 const dbAdapter = new FirestoreDbAdapter();
 
 const rpName = 'Antigravity Kanban Classroom';
-const rpID = 'antigravity-kanban-game.firebaseapp.com';
+
+function getRpId(request: any): string {
+  const origin = request.rawRequest?.headers?.origin || '';
+  return origin.includes('localhost') ? 'localhost' : 'brazimus.github.io';
+}
 
 const allowedOrigins = [
   'https://brazimus.github.io',
@@ -104,8 +108,8 @@ export const generateRegistrationOptions = onCall(async (request) => {
 
   const options = await genRegOptions({
     rpName,
-    rpID,
-    userID: userId,
+    rpID: getRpId(request),
+    userID: Buffer.from(userId) as any,
     userName: email,
     userDisplayName: email,
     attestationType: 'none',
@@ -148,7 +152,7 @@ export const verifyRegistration = onCall(async (request) => {
       response: credential,
       expectedChallenge,
       expectedOrigin: allowedOrigins,
-      expectedRPID: rpID
+      expectedRPID: getRpId(request)
     });
   } catch (err: any) {
     throw new HttpsError('invalid-argument', err.message || 'Signature verification failed.');
@@ -207,7 +211,7 @@ export const generateAuthenticationOptions = onCall(async (request) => {
   }
 
   const options = await genAuthOptions({
-    rpID,
+    rpID: getRpId(request),
     allowCredentials: credentials.map((c: any) => ({
       id: base64UrlToBuffer(c.credentialID),
       type: 'public-key',
@@ -249,7 +253,7 @@ export const verifyAuthentication = onCall(async (request) => {
       response: assertion,
       expectedChallenge,
       expectedOrigin: allowedOrigins,
-      expectedRPID: rpID,
+      expectedRPID: getRpId(request),
       authenticator: {
         credentialID: base64UrlToBuffer(cred.credentialID),
         credentialPublicKey: base64UrlToBuffer(cred.credentialPublicKey),
