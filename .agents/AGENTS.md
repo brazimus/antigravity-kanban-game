@@ -37,5 +37,5 @@
 ## Distributed Team Coordination & Issue-First Workflow Policy
 *   **Issue-First Implementation**: No coding implementation work can begin before establishing clear Features and User Stories. Each User Story must be registered, approved, and contain explicit Acceptance Criteria (AC) and Given-When-Then BDD scenarios.
 *   **Branch-to-Issue Traceability**: All feature branch names must follow the convention `issue-<ID>-<short-description>`.
-*   **PR reviews and templates**: Pull Requests must include a standard description template outlining the linked issues, architectural/design changes, and verification summaries.
+*   **PR reviews and templates**: Pull Requests must include a standard description template outlining the linked issues, architectural/design changes, and verification summaries. Pull Requests must link to and close the child User Stories (e.g., 'Closes #storyId') rather than the parent Feature. The parent Feature is only closed once all of its child stories are closed.
 
