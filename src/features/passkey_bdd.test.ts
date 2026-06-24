@@ -57,7 +57,7 @@ runner.register(/^the Admin initiates passkey login for "([^"]+)"$/, async (cont
   try {
     await context.auth.signInWithPasskey(email);
     context.actions.navigatedToLobby = true;
-  } catch (err: any) {
+  } catch {
     context.actions.navigatedToLobby = false;
   }
 });
@@ -86,9 +86,18 @@ runner.register(/^the Admin logs in with backup passphrase "([^"]+)" for "([^"]+
   try {
     await context.auth.signInWithBackupPassphrase(email, passphrase);
     context.actions.promptedToRegisterPasskey = true;
-  } catch (err: any) {
+  } catch {
     context.actions.promptedToRegisterPasskey = false;
   }
+});
+
+runner.register(/^a legacy Admin "([^"]+)" with password "([^"]+)" who has no passkey or backup passphrase hash$/, (context: TestContext, email: string, password: string) => {
+  context.auth.seedUser({
+    uid: 'legacy-admin-456',
+    email,
+    roles: { admin: true, superAdmin: false },
+    passkeys: []
+  }, undefined, password);
 });
 
 runner.register(/^the login succeeds$/, async (context: TestContext) => {

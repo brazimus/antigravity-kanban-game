@@ -4,7 +4,8 @@ import {
   signOut as fbSignOut, 
   sendSignInLinkToEmail, 
   signInWithEmailLink as fbSignInWithEmailLink,
-  onAuthStateChanged as fbOnAuthStateChanged
+  onAuthStateChanged as fbOnAuthStateChanged,
+  signInWithEmailAndPassword
 } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
@@ -69,7 +70,6 @@ export class FirebaseAuthAdapter implements AuthAdapter {
     const userSnapshot = await getDoc(userDocRef);
     
     let roles = { admin: true, superAdmin: false };
-    let passkeys: PasskeyInfo[] = [];
 
     if (userSnapshot.exists()) {
       const data = userSnapshot.data();
@@ -79,7 +79,7 @@ export class FirebaseAuthAdapter implements AuthAdapter {
     // Fetch credentials list
     const credentialsRef = collection(db, 'users', uid, 'credentials');
     const credentialsSnapshot = await getDocs(credentialsRef);
-    passkeys = credentialsSnapshot.docs.map(d => {
+    const passkeys: PasskeyInfo[] = credentialsSnapshot.docs.map(d => {
       const c = d.data();
       return {
         id: d.id,
@@ -211,14 +211,28 @@ export class FirebaseAuthAdapter implements AuthAdapter {
   }
 
   public async signInWithBackupPassphrase(email: string, passphrase: string): Promise<AdminProfile> {
-    const verifyBackupFn = httpsCallable<
-      { email: string; passphrase: string }, 
-      { customToken: string }
-    >(getFunctions(), 'verifyBackupPassphrase');
-    const { data: { customToken } } = await verifyBackupFn({ email, passphrase });
+    try {
+      const verifyBackupFn = httpsCallable<
+        { email: string; passphrase: string }, 
+        { customToken: string }
+      >(getFunctions(), 'verifyBackupPassphrase');
+      const { data: { customToken } } = await verifyBackupFn({ email, passphrase });
 
-    const credential = await signInWithCustomToken(auth, customToken);
-    return this.fetchAdminProfile(credential.user.uid, email);
+      const credential = await signInWithCustomToken(auth, customToken);
+      return this.fetchAdminProfile(credential.user.uid, email);
+    } catch (err: unknown) {
+      console.warn('Backup passphrase verification failed, attempting standard email/password login as fallback:', err);
+      try {
+        // Fallback to standard email/password authentication (useful for pre-passkey legacy accounts)
+        const credential = await signInWithEmailAndPassword(auth, email, passphrase);
+        return this.fetchAdminProfile(credential.user.uid, email);
+      } catch (fallbackErr: unknown) {
+        console.error('Email/password fallback also failed:', fallbackErr);
+        // Throw a user-friendly error
+        const errorMessage = fallbackErr instanceof Error ? fallbackErr.message : 'Authentication failed. Invalid passkey recovery code or password.';
+        throw new Error(errorMessage, { cause: fallbackErr });
+      }
+    }
   }
 
   public async deletePasskey(credentialId: string): Promise<void> {
