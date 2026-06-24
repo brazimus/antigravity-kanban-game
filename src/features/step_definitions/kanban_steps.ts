@@ -1077,7 +1077,7 @@ export const registerSteps = (runner: BddRunner) => {
   });
 
   runner.register(/^the day ends and QA failure occurs$/, (context) => {
-    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.05);
+    const randomSpy = vi.spyOn(Math, 'random').mockReturnValue(0.18);
     act(() => {
       context.result.current.endDay();
     });

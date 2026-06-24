@@ -573,7 +573,7 @@ export const useGameState = () => {
         if (workedOnToday && isWorking && !card.isBlocked) {
           const isPaired = card.assignedAvatars.length > 1;
           const roll1 = Math.random();
-          const roll2 = isPaired ? Math.random() : 1; // 1 means safe
+          const roll2 = isPaired ? Math.random() : 0; // 0 means fallback to check only roll1
           
           const blocked1 = roll1 < finalBlockerChance;
           const blocked2 = roll2 < finalBlockerChance;

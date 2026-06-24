@@ -202,22 +202,34 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
     const unsubGame = onSnapshot(gameDocRef, async (snap) => {
       if (snap.exists()) {
         const data = snap.data();
-        setGameState(prev => ({
-          ...prev,
-          day: data.day || 1,
-          maxDays: data.maxDays || 10,
-          gamePhase: data.gamePhase || 'day_start',
-          activeScenarioId: data.activeScenarioId || 'easy_mode',
-          pairingAllowed: data.pairingAllowed || false,
-          dailyLogs: data.dailyLogs || [],
-          currentDayEvent: data.currentDayEvent || null,
-          eventLogs: data.eventLogs || [],
-          wipLimitsActive: data.wipLimitsActive || false,
-          shiftLeftActive: data.shiftLeftActive || false,
-          swarmingActive: data.swarmingActive || false,
-          smallerBatchesActive: data.smallerBatchesActive || false,
-          config: data.config || undefined
-        }));
+        const wipActive = data.wipLimitsActive || false;
+        setGameState(prev => {
+          const updatedColumns = prev.columns.map(col => {
+            if (wipActive) {
+              if (col.id === 'analysis') return { ...col, wipLimit: 2 };
+              if (col.id === 'development') return { ...col, wipLimit: 2 };
+              if (col.id === 'testing') return { ...col, wipLimit: 1 };
+            }
+            return { ...col, wipLimit: null };
+          });
+          return {
+            ...prev,
+            day: data.day || 1,
+            maxDays: data.maxDays || 10,
+            gamePhase: data.gamePhase || 'day_start',
+            activeScenarioId: data.activeScenarioId || 'easy_mode',
+            pairingAllowed: data.pairingAllowed || false,
+            dailyLogs: data.dailyLogs || [],
+            currentDayEvent: data.currentDayEvent || null,
+            eventLogs: data.eventLogs || [],
+            wipLimitsActive: wipActive,
+            shiftLeftActive: data.shiftLeftActive || false,
+            swarmingActive: data.swarmingActive || false,
+            smallerBatchesActive: data.smallerBatchesActive || false,
+            config: data.config || undefined,
+            columns: updatedColumns
+          };
+        });
       } else if (isAdmin) {
         // Document does not exist and current user is admin, initialize the room
         try {
@@ -814,7 +826,7 @@ export const useMultiplayerState = (roomCode: string | null, currentPlayerId: st
           if (workedOnToday && isWorking && !card.isBlocked) {
             const isPaired = card.assignedAvatars.length > 1;
             const roll1 = Math.random();
-            const roll2 = isPaired ? Math.random() : 1.0;
+            const roll2 = isPaired ? Math.random() : 0.0;
 
             if (roll1 < finalBlockerChance && roll2 < finalBlockerChance) {
               blockerLogs.push(`[Blocker] Oh no! "${card.title}" got blocked by a quality bug.`);
