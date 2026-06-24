@@ -26,3 +26,5 @@ dist-ssr
 # Firebase Cloud Functions compiled files
 functions/lib
 
+# Local dev/test tools profiles
+chrome-profile/
